@@ -21,17 +21,15 @@ apiClient.interceptors.request.use(async (config) => {
 // Interceptor para tratar erros
 apiClient.interceptors.response.use(
   (response) => response,
-  (error) => {
-    if (error.response) {
-      // Erro da API
-      return Promise.reject(error);
-    } else if (error.request) {
-      // Requisição feita mas sem resposta
-      return Promise.reject(new Error('Sem resposta do servidor'));
-    } else {
-      // Erro ao configurar requisição
+  async (error) => {
+    // Não mostrar toast para erros que já foram tratados ou que têm skipErrorToast
+    if (error.config?.skipErrorToast) {
       return Promise.reject(error);
     }
+    
+    // Erros serão tratados pelos componentes individualmente
+    // Não mostrar toast automático aqui para evitar duplicação
+    return Promise.reject(error);
   }
 );
 
