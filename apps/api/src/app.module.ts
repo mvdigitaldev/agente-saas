@@ -13,6 +13,7 @@ import { PaymentsModule } from './modules/payments/payments.module';
 import { CrmModule } from './modules/crm/crm.module';
 import { MetricsModule } from './modules/metrics/metrics.module';
 import { JobsModule } from './modules/jobs/jobs.module';
+import { getRedisConnection } from './config/redis.config';
 
 @Module({
   imports: [
@@ -20,15 +21,7 @@ import { JobsModule } from './modules/jobs/jobs.module';
       isGlobal: true,
     }),
     BullModule.forRoot({
-      connection: {
-        host: process.env.REDIS_HOST || 'localhost',
-        port: parseInt(process.env.REDIS_PORT || '6379'),
-        password: process.env.REDIS_PASSWORD,
-        ...(process.env.REDIS_URL && {
-          // Upstash Redis URL format
-          url: process.env.REDIS_URL,
-        }),
-      },
+      connection: getRedisConnection(), // Instância do ioredis ou URL string
     }),
     DatabaseModule,
     AuthModule,

@@ -10,7 +10,12 @@ export class UazapiWebhookDto {
   messageId?: string;
 
   @IsString()
-  from: string;
+  @IsOptional()
+  instance_id?: string;
+
+  @IsString()
+  @IsOptional()
+  from?: string;
 
   @IsString()
   @IsOptional()

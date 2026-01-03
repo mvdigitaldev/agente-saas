@@ -18,3 +18,20 @@ apiClient.interceptors.request.use(async (config) => {
   return config;
 });
 
+// Interceptor para tratar erros
+apiClient.interceptors.response.use(
+  (response) => response,
+  (error) => {
+    if (error.response) {
+      // Erro da API
+      return Promise.reject(error);
+    } else if (error.request) {
+      // Requisição feita mas sem resposta
+      return Promise.reject(new Error('Sem resposta do servidor'));
+    } else {
+      // Erro ao configurar requisição
+      return Promise.reject(error);
+    }
+  }
+);
+

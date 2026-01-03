@@ -12,7 +12,14 @@ logger = get_logger(__name__)
 class QueueConsumer:
     def __init__(self):
         redis_url = os.getenv("REDIS_URL", "redis://localhost:6379")
-        self.redis_client = redis.from_url(redis_url, decode_responses=True)
+        # Configurar SSL se for rediss:// (Upstash)
+        ssl = redis_url.startswith("rediss://")
+        self.redis_client = redis.from_url(
+            redis_url, 
+            decode_responses=True,
+            ssl=ssl,
+            ssl_cert_reqs=None if ssl else None,  # Upstash usa certificado válido
+        )
         self.agent = AgentCore()
         self.queue_name = "bull:process-inbound-message:wait"
 
