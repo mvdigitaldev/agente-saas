@@ -25,7 +25,7 @@ export default function ConfiguracaoPage() {
     waitlist_enabled: false,
     marketing_campaigns: false,
   })
-  const [loading, setLoading] = useState(false)
+  const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
   const { toast } = useToast()
 
@@ -41,17 +41,38 @@ export default function ConfiguracaoPage() {
   }, [empresaId])
 
   const loadEmpresaId = async () => {
-    const { data: { user } } = await supabase.auth.getUser()
-    if (user) {
-      const { data } = await supabase
-        .from('empresa_users')
-        .select('empresa_id')
-        .eq('user_id', user.id)
-        .single()
+    try {
+      const { data, error } = await apiClient.get('/auth/me/empresa')
       
-      if (data) {
-        setEmpresaId(data.empresa_id)
+      if (error) {
+        console.error('Erro ao buscar empresa_id:', error)
+        toast({
+          title: 'Erro',
+          description: 'Não foi possível carregar os dados da empresa.',
+          variant: 'destructive',
+        })
+        setLoading(false)
+        return
       }
+      
+      if (data?.empresa_id) {
+        setEmpresaId(data.empresa_id)
+      } else {
+        toast({
+          title: 'Aviso',
+          description: 'Empresa não encontrada. Entre em contato com o suporte.',
+          variant: 'destructive',
+        })
+        setLoading(false)
+      }
+    } catch (error: any) {
+      console.error('Erro inesperado:', error)
+      toast({
+        title: 'Erro',
+        description: error.response?.data?.message || 'Ocorreu um erro inesperado.',
+        variant: 'destructive',
+      })
+      setLoading(false)
     }
   }
 
@@ -74,13 +95,20 @@ export default function ConfiguracaoPage() {
   }
 
   const loadFeatures = async () => {
+    if (!empresaId) return
+    
     try {
       const { data } = await apiClient.get(`/agent-config/${empresaId}/features`)
       if (data) {
         setFeatures(data)
       }
-    } catch (error) {
+    } catch (error: any) {
       console.error('Error loading features:', error)
+      toast({
+        title: 'Erro ao carregar funcionalidades',
+        description: error.response?.data?.message || 'Tente recarregar a página.',
+        variant: 'destructive',
+      })
     }
   }
 
@@ -122,10 +150,23 @@ export default function ConfiguracaoPage() {
     }
   }
 
-  if (loading || !empresaId) {
+  if (loading) {
     return (
       <div className="flex items-center justify-center min-h-[400px]">
         <Loader2 className="h-8 w-8 animate-spin text-primary" />
+      </div>
+    )
+  }
+
+  if (!empresaId) {
+    return (
+      <div className="space-y-6">
+        <div>
+          <h1 className="text-3xl font-bold tracking-tight">Configuração do Agente</h1>
+          <p className="text-muted-foreground">
+            Não foi possível carregar os dados da empresa. Por favor, recarregue a página.
+          </p>
+        </div>
       </div>
     )
   }

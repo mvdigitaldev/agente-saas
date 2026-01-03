@@ -10,19 +10,20 @@
     --card-foreground: 240 10% 3.9%;
     --popover: 0 0% 100%;
     --popover-foreground: 240 10% 3.9%;
-    --primary: 340 82% 78%;
+    /* Rosa vibrante e profissional para salões de beleza - seguindo melhores práticas Shadcn */
+    --primary: 340 75% 55%;
     --primary-foreground: 0 0% 100%;
-    --secondary: 340 40% 96%;
-    --secondary-foreground: 340 10% 20%;
-    --muted: 340 20% 96%;
+    --secondary: 340 30% 95%;
+    --secondary-foreground: 340 20% 25%;
+    --muted: 340 15% 96%;
     --muted-foreground: 240 3.7% 46.1%;
-    --accent: 340 60% 90%;
-    --accent-foreground: 340 10% 20%;
+    --accent: 340 65% 92%;
+    --accent-foreground: 340 20% 25%;
     --destructive: 0 84.2% 60.2%;
     --destructive-foreground: 0 0% 98%;
-    --border: 340 20% 90%;
-    --input: 340 20% 90%;
-    --ring: 340 82% 78%;
+    --border: 340 25% 88%;
+    --input: 340 25% 88%;
+    --ring: 340 75% 55%;
     --radius: 0.75rem;
   }
 
@@ -33,19 +34,20 @@
     --card-foreground: 0 0% 98%;
     --popover: 240 10% 3.9%;
     --popover-foreground: 0 0% 98%;
-    --primary: 340 70% 75%;
-    --primary-foreground: 240 10% 3.9%;
+    /* Rosa mais suave no dark mode, mas ainda vibrante */
+    --primary: 340 70% 65%;
+    --primary-foreground: 0 0% 100%;
     --secondary: 240 4.8% 15.9%;
     --secondary-foreground: 0 0% 98%;
     --muted: 240 3.7% 15.9%;
     --muted-foreground: 240 5% 64.9%;
-    --accent: 240 3.7% 15.9%;
+    --accent: 340 30% 20%;
     --accent-foreground: 0 0% 98%;
     --destructive: 0 62.8% 30.6%;
     --destructive-foreground: 0 0% 98%;
     --border: 240 3.7% 15.9%;
     --input: 240 3.7% 15.9%;
-    --ring: 340 70% 75%;
+    --ring: 340 70% 65%;
   }
 }
 
@@ -54,8 +56,211 @@
     @apply border-border;
   }
   body {
-    @apply bg-background text-foreground;
+    @apply bg-background text-foreground font-sans;
     font-feature-settings: "rlig" 1, "calt" 1;
+  }
+}
+
+@layer utilities {
+  /* Animações para componentes UI */
+  .animate-in {
+    animation-duration: 150ms;
+    animation-timing-function: cubic-bezier(0.16, 1, 0.3, 1);
+    animation-fill-mode: both;
+  }
+
+  .animate-out {
+    animation-duration: 150ms;
+    animation-timing-function: cubic-bezier(0.16, 1, 0.3, 1);
+    animation-fill-mode: both;
+  }
+
+  .fade-in-0 {
+    animation-name: fade-in;
+    --tw-enter-opacity: initial;
+  }
+
+  .fade-out-0 {
+    animation-name: fade-out;
+    --tw-exit-opacity: initial;
+  }
+
+  .zoom-in-95 {
+    animation-name: zoom-in;
+    --tw-enter-scale: 0.95;
+  }
+
+  .zoom-out-95 {
+    animation-name: zoom-out;
+    --tw-exit-scale: 0.95;
+  }
+
+  .slide-in-from-left-1\/2 {
+    animation-name: slide-in-from-left;
+    --tw-enter-translate-x: -50%;
+  }
+
+  .slide-in-from-top-\[48\%\] {
+    animation-name: slide-in-from-top;
+    --tw-enter-translate-y: -48%;
+  }
+
+  .slide-out-to-left-1\/2 {
+    animation-name: slide-out-to-left;
+    --tw-exit-translate-x: -50%;
+  }
+
+  .slide-out-to-top-\[48\%\] {
+    animation-name: slide-out-to-top;
+    --tw-exit-translate-y: -48%;
+  }
+
+  .slide-in-from-right-2 {
+    animation-name: slide-in-from-right;
+    --tw-enter-translate-x: 0.5rem;
+  }
+
+  .slide-in-from-left-2 {
+    animation-name: slide-in-from-left;
+    --tw-enter-translate-x: -0.5rem;
+  }
+
+  .slide-in-from-top-2 {
+    animation-name: slide-in-from-top;
+    --tw-enter-translate-y: -0.5rem;
+  }
+
+  .slide-in-from-bottom-2 {
+    animation-name: slide-in-from-bottom;
+    --tw-enter-translate-y: 0.5rem;
+  }
+
+  .slide-out-to-right {
+    animation-name: slide-out-to-right;
+    --tw-exit-translate-x: 100%;
+  }
+
+  .slide-out-to-left {
+    animation-name: slide-out-to-left;
+    --tw-exit-translate-x: -100%;
+  }
+
+  .slide-out-to-top {
+    animation-name: slide-out-to-top;
+    --tw-exit-translate-y: -100%;
+  }
+
+  .slide-out-to-bottom {
+    animation-name: slide-out-to-bottom;
+    --tw-exit-translate-y: 100%;
+  }
+
+  @keyframes fade-in {
+    from {
+      opacity: 0;
+    }
+    to {
+      opacity: 1;
+    }
+  }
+
+  @keyframes fade-out {
+    from {
+      opacity: 1;
+    }
+    to {
+      opacity: 0;
+    }
+  }
+
+  @keyframes zoom-in {
+    from {
+      transform: scale(var(--tw-enter-scale, 0.95));
+    }
+    to {
+      transform: scale(1);
+    }
+  }
+
+  @keyframes zoom-out {
+    from {
+      transform: scale(1);
+    }
+    to {
+      transform: scale(var(--tw-exit-scale, 0.95));
+    }
+  }
+
+  @keyframes slide-in-from-left {
+    from {
+      transform: translateX(var(--tw-enter-translate-x, 0));
+    }
+    to {
+      transform: translateX(0);
+    }
+  }
+
+  @keyframes slide-in-from-right {
+    from {
+      transform: translateX(var(--tw-enter-translate-x, 0));
+    }
+    to {
+      transform: translateX(0);
+    }
+  }
+
+  @keyframes slide-in-from-top {
+    from {
+      transform: translateY(var(--tw-enter-translate-y, 0));
+    }
+    to {
+      transform: translateY(0);
+    }
+  }
+
+  @keyframes slide-in-from-bottom {
+    from {
+      transform: translateY(var(--tw-enter-translate-y, 0));
+    }
+    to {
+      transform: translateY(0);
+    }
+  }
+
+  @keyframes slide-out-to-left {
+    from {
+      transform: translateX(0);
+    }
+    to {
+      transform: translateX(var(--tw-exit-translate-x, 0));
+    }
+  }
+
+  @keyframes slide-out-to-right {
+    from {
+      transform: translateX(0);
+    }
+    to {
+      transform: translateX(var(--tw-exit-translate-x, 0));
+    }
+  }
+
+  @keyframes slide-out-to-top {
+    from {
+      transform: translateY(0);
+    }
+    to {
+      transform: translateY(var(--tw-exit-translate-y, 0));
+    }
+  }
+
+  @keyframes slide-out-to-bottom {
+    from {
+      transform: translateY(0);
+    }
+    to {
+      transform: translateY(var(--tw-exit-translate-y, 0));
+    }
   }
 }
 

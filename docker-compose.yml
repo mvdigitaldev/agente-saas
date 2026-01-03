@@ -36,7 +36,7 @@ services:
       context: ./apps/agent
       dockerfile: Dockerfile
     environment:
-      - REDIS_URL=redis://redis:6379
+      - REDIS_URL=rediss://default:AUH2AAIncDIwZGIwOTJmZDY3Yzc0Y2RmYTRjODNmMTEwYTk5MWIxZXAyMTY4ODY@fun-warthog-16886.upstash.io:6379
       - SUPABASE_URL=${SUPABASE_URL}
       - SUPABASE_SERVICE_ROLE_KEY=${SUPABASE_SERVICE_ROLE_KEY}
       - NEST_API_URL=http://nest-api:3001

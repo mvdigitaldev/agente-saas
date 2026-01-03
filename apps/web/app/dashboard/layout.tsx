@@ -17,34 +17,65 @@ export default function DashboardLayout({
 
   useEffect(() => {
     let mounted = true
+    let checkCount = 0
+    const maxChecks = 3
 
     const checkAuth = async () => {
-      // Aguardar um pouco para garantir que o localStorage foi atualizado
-      await new Promise(resolve => setTimeout(resolve, 100))
-      
-      const { data: { session }, error } = await supabase.auth.getSession()
-      
-      if (!mounted) return
-      
-      if (error || !session) {
-        router.push('/login')
+      if (checkCount >= maxChecks) {
+        // Se já verificou várias vezes sem sucesso, parar de tentar
+        setLoading(false)
         return
       }
+
+      checkCount++
       
-      setLoading(false)
+      try {
+        const { data: { session }, error } = await supabase.auth.getSession()
+        
+        if (!mounted) return
+        
+        if (error) {
+          console.error('Erro ao verificar sessão:', error)
+          if (checkCount >= maxChecks) {
+            router.push('/login')
+            return
+          }
+          // Tentar novamente após um delay
+          setTimeout(checkAuth, 500)
+          return
+        }
+        
+        if (!session) {
+          if (checkCount >= maxChecks) {
+            router.push('/login')
+            return
+          }
+          // Tentar novamente após um delay
+          setTimeout(checkAuth, 500)
+          return
+        }
+        
+        // Sessão encontrada, parar loading
+        setLoading(false)
+      } catch (err) {
+        console.error('Erro inesperado ao verificar autenticação:', err)
+        if (checkCount >= maxChecks) {
+          setLoading(false)
+        }
+      }
     }
 
+    // Verificar imediatamente
     checkAuth()
 
-    // Listener para mudanças na sessão
+    // Listener para mudanças na sessão (apenas para logout)
     const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
       if (!mounted) return
       
-      if (event === 'SIGNED_OUT' || !session) {
+      if (event === 'SIGNED_OUT' || (!session && event !== 'INITIAL_SESSION')) {
         router.push('/login')
-      } else if (event === 'SIGNED_IN' && session) {
-        setLoading(false)
-      } else if (event === 'TOKEN_REFRESHED' && session) {
+      } else if (session && loading) {
+        // Se tiver sessão e ainda estiver carregando, parar loading
         setLoading(false)
       }
     })
@@ -53,7 +84,7 @@ export default function DashboardLayout({
       mounted = false
       subscription.unsubscribe()
     }
-  }, [router])
+  }, [router, loading])
 
   if (loading) {
     return (

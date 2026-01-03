@@ -1,20 +1,59 @@
-import { Injectable, BadRequestException } from '@nestjs/common';
+import { Injectable, BadRequestException, UnauthorizedException } from '@nestjs/common';
 import { SupabaseService } from '../../database/supabase.service';
 import { SignupDto } from './dto/signup.dto';
+import { EmpresasService } from '../empresas/empresas.service';
+import type { Request } from 'express';
+import { createSupabaseClientFromRequest } from '../../common/helpers/supabase-request.helper';
 
 @Injectable()
 export class AuthService {
-  constructor(private supabase: SupabaseService) {}
+  constructor(
+    private supabase: SupabaseService,
+    private empresasService: EmpresasService,
+  ) {}
 
-  async verifyToken(token: string) {
-    const client = this.supabase.getClient();
-    const { data, error } = await client.auth.getUser(token);
-
-    if (error) {
-      throw new Error('Invalid token');
+  /**
+   * Verifica o token do usuário usando o mesmo método do iAgenda
+   * Cria um cliente Supabase a partir do request e usa getUser() sem parâmetros
+   * que automaticamente pega o token do header Authorization
+   */
+  async verifyTokenFromRequest(req: Request) {
+    const supabase = createSupabaseClientFromRequest(req);
+    
+    // getUser() sem parâmetros pega automaticamente do header Authorization
+    const { data: userRes, error } = await supabase.auth.getUser();
+    
+    if (error || !userRes?.user) {
+      throw new UnauthorizedException(`Token inválido: ${error?.message || 'Usuário não encontrado'}`);
     }
 
-    return data.user;
+    return userRes.user;
+  }
+
+  async getEmpresaIdByUserId(userId: string) {
+    const db = this.supabase.getServiceRoleClient();
+    
+    const { data, error } = await db
+      .from('empresa_users')
+      .select('empresa_id')
+      .eq('user_id', userId)
+      .single();
+
+    if (error) {
+      throw new Error(`Erro ao buscar empresa: ${error.message}`);
+    }
+
+    return data?.empresa_id || null;
+  }
+
+  async getMyEmpresa(userId: string) {
+    const empresaId = await this.getEmpresaIdByUserId(userId);
+    
+    if (!empresaId) {
+      return null;
+    }
+
+    return this.empresasService.getEmpresa(empresaId);
   }
 
   async signup(dto: SignupDto) {

@@ -41,17 +41,38 @@ export default function BloqueiosPage() {
   }, [empresaId])
 
   const loadEmpresaId = async () => {
-    const { data: { user } } = await supabase.auth.getUser()
-    if (user) {
-      const { data } = await supabase
-        .from('empresa_users')
-        .select('empresa_id')
-        .eq('user_id', user.id)
-        .single()
+    try {
+      const { data, error } = await apiClient.get('/auth/me/empresa')
       
-      if (data) {
-        setEmpresaId(data.empresa_id)
+      if (error) {
+        console.error('Erro ao buscar empresa_id:', error)
+        toast({
+          title: 'Erro',
+          description: 'Não foi possível carregar os dados da empresa.',
+          variant: 'destructive',
+        })
+        setLoading(false)
+        return
       }
+      
+      if (data?.empresa_id) {
+        setEmpresaId(data.empresa_id)
+      } else {
+        toast({
+          title: 'Aviso',
+          description: 'Empresa não encontrada. Entre em contato com o suporte.',
+          variant: 'destructive',
+        })
+        setLoading(false)
+      }
+    } catch (error: any) {
+      console.error('Erro inesperado:', error)
+      toast({
+        title: 'Erro',
+        description: error.response?.data?.message || 'Ocorreu um erro inesperado.',
+        variant: 'destructive',
+      })
+      setLoading(false)
     }
   }
 
@@ -112,10 +133,23 @@ export default function BloqueiosPage() {
     }
   }
 
-  if (!empresaId) {
+  if (loading && !empresaId) {
     return (
       <div className="flex items-center justify-center min-h-[400px]">
         <Loader2 className="h-8 w-8 animate-spin text-primary" />
+      </div>
+    )
+  }
+
+  if (!empresaId && !loading) {
+    return (
+      <div className="space-y-6">
+        <div>
+          <h1 className="text-3xl font-bold tracking-tight">Bloqueios de Agenda</h1>
+          <p className="text-muted-foreground">
+            Não foi possível carregar os dados da empresa. Por favor, recarregue a página.
+          </p>
+        </div>
       </div>
     )
   }
