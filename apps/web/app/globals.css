@@ -59,6 +59,14 @@
     @apply bg-background text-foreground font-sans;
     font-feature-settings: "rlig" 1, "calt" 1;
   }
+  
+  /* Garantir centralização perfeita do Dialog */
+  [role="dialog"] {
+    position: fixed !important;
+    left: 50% !important;
+    top: 50% !important;
+    transform: translate(-50%, -50%) !important;
+  }
 }
 
 @layer utilities {
