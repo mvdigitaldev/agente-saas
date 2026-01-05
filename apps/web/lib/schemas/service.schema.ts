@@ -16,9 +16,7 @@ export const createServiceSchema = z.object({
     .optional()
     .nullable(),
   preco: z
-    .number()
-    .min(0, "Preço não pode ser negativo")
-    .max(999999.99, "Preço muito alto")
+    .union([z.number().min(0, "Preço não pode ser negativo").max(999999.99, "Preço muito alto"), z.null(), z.undefined()])
     .optional()
     .nullable(),
   duracao_minutos: z
@@ -28,13 +26,9 @@ export const createServiceSchema = z.object({
     .max(1440, "Duração não pode exceder 24 horas (1440 minutos)"),
   image_url: z
     .string()
-    .url("URL de imagem inválida")
-    .refine(
-      (url) => url.startsWith("https://"),
-      "URL deve usar protocolo HTTPS"
-    )
     .optional()
-    .nullable(), // Deprecated: usar images[]
+    .nullable()
+    .or(z.literal("")), // Deprecated: usar images[] - aceita string vazia ou null
   images: z
     .array(z.string().url("URL de imagem inválida"))
     .optional()

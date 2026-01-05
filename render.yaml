@@ -23,6 +23,13 @@ services:
       - key: FRONTEND_URL
         value: https://agente-saas-web.vercel.app
         # Atualizar com a URL real do frontend na Vercel após deploy
+      - key: WEBHOOK_BASE_URL
+        value: https://agente-saas-api.onrender.com
+        # URL base para webhooks (deve ser a URL pública da API no Render)
+      - key: UAZAPI_BASE_URL
+        sync: false
+      - key: UAZAPI_ADMIN_TOKEN
+        sync: false
 
   # Python Agent Worker
   - type: worker

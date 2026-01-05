@@ -11,13 +11,20 @@ class QueueConsumer:
     def __init__(self):
         redis_url = os.getenv("REDIS_URL", "redis://localhost:6379")
         # Configurar SSL se for rediss:// (Upstash)
-        ssl = redis_url.startswith("rediss://")
-        self.redis_client = redis.from_url(
-            redis_url, 
-            decode_responses=True,
-            ssl=ssl,
-            ssl_cert_reqs=None if ssl else None,  # Upstash usa certificado válido
-        )
+        # Na versão 5.0.1 do redis, não usamos ssl=bool, mas sim ssl_cert_reqs
+        if redis_url.startswith("rediss://"):
+            # Para conexões SSL (Upstash), usar ssl_cert_reqs
+            self.redis_client = redis.from_url(
+                redis_url, 
+                decode_responses=True,
+                ssl_cert_reqs=None,  # Upstash usa certificado válido
+            )
+        else:
+            # Para conexões não-SSL
+            self.redis_client = redis.from_url(
+                redis_url, 
+                decode_responses=True,
+            )
         self.agent = AgentCore()
         self.queue_name = "bull:process-inbound-message:wait"
 

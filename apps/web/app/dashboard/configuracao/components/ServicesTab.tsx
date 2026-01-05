@@ -170,6 +170,8 @@ export function ServicesTab({ empresaId }: ServicesTabProps) {
 
   const onSubmit = useCallback(
     async (data: CreateServiceInput | UpdateServiceInput) => {
+      console.log("onSubmit chamado com dados:", data);
+      
       if (!empresaId) {
         toast({
           title: "Erro",
@@ -181,23 +183,39 @@ export function ServicesTab({ empresaId }: ServicesTabProps) {
 
       setIsSubmitting(true);
       try {
-        // Incluir images no payload e garantir valores padrão
-        const payload = {
-          ...data,
-          images: serviceImages,
+        // Limpar campos vazios e garantir valores padrão
+        const payload: any = {
+          nome: data.nome?.trim() || "",
+          descricao: data.descricao?.trim() || null,
+          preco: data.preco && data.preco > 0 ? Number(data.preco) : null,
+          duracao_minutos: Number(data.duracao_minutos) || 30,
+          images: serviceImages.length > 0 ? serviceImages : null,
+          image_url: null, // Deprecated, sempre null
+          ativo: data.ativo ?? true,
           available_online: true, // Sempre true
           show_price_online: true, // Sempre true
+          fixed_price: data.fixed_price ?? true,
         };
+
+        console.log("Payload a ser enviado:", payload);
 
         if (editingService) {
           const result = await updateService(editingService.service_id, payload as UpdateServiceInput);
           if (result) {
+            toast({
+              title: "Sucesso",
+              description: "Serviço atualizado com sucesso!",
+            });
             handleCloseServiceDialog();
             refetch();
           }
         } else {
           const result = await createService(payload as CreateServiceInput);
           if (result) {
+            toast({
+              title: "Sucesso",
+              description: "Serviço criado com sucesso!",
+            });
             handleCloseServiceDialog();
             refetch();
           }
@@ -206,7 +224,7 @@ export function ServicesTab({ empresaId }: ServicesTabProps) {
         console.error("Erro ao salvar serviço:", error);
         toast({
           title: "Erro",
-          description: error.message || "Erro ao salvar serviço",
+          description: error.message || error.response?.data?.message || "Erro ao salvar serviço",
           variant: "destructive",
         });
       } finally {
@@ -527,7 +545,20 @@ export function ServicesTab({ empresaId }: ServicesTabProps) {
                 : "Preencha as informações para criar um novo serviço"}
             </DialogDescription>
           </DialogHeader>
-          <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-4">
+          <form 
+            onSubmit={form.handleSubmit(
+              onSubmit,
+              (errors) => {
+                console.error("Erros de validação:", errors);
+                toast({
+                  title: "Erro de validação",
+                  description: "Por favor, preencha todos os campos obrigatórios corretamente.",
+                  variant: "destructive",
+                });
+              }
+            )} 
+            className="space-y-4"
+          >
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <div className="space-y-2">
                 <Label htmlFor="nome">
