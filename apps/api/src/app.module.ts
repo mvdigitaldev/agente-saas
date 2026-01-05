@@ -13,6 +13,7 @@ import { PaymentsModule } from './modules/payments/payments.module';
 import { CrmModule } from './modules/crm/crm.module';
 import { MetricsModule } from './modules/metrics/metrics.module';
 import { JobsModule } from './modules/jobs/jobs.module';
+import { ServicesModule } from './modules/services/services.module';
 import { getRedisConnection } from './config/redis.config';
 
 @Module({
@@ -35,6 +36,7 @@ import { getRedisConnection } from './config/redis.config';
     CrmModule,
     MetricsModule,
     JobsModule,
+    ServicesModule,
   ],
 })
 export class AppModule {}

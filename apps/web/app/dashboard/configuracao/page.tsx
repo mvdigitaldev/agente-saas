@@ -1,362 +1,108 @@
-'use client'
+"use client";
 
-import { useState, useEffect } from 'react'
-import { apiClient } from '@/lib/api-client'
-import { supabase } from '@/lib/supabase/client'
-import { Button } from '@/components/ui/button'
-import { Input } from '@/components/ui/input'
-import { Label } from '@/components/ui/label'
-import { Textarea } from '@/components/ui/textarea'
-import { Switch } from '@/components/ui/switch'
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
-import { Separator } from '@/components/ui/separator'
-import { useToast } from '@/hooks/use-toast'
-import { Loader2, Save } from 'lucide-react'
+import { useState, useEffect } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
+import { apiClient } from "@/lib/api-client";
+import { useToast } from "@/hooks/use-toast";
+import { Loader2 } from "lucide-react";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { AgentTab } from "./components/AgentTab";
+import { ServicesTab } from "./components/ServicesTab";
 
 export default function ConfiguracaoPage() {
-  const [empresaId, setEmpresaId] = useState<string | null>(null)
-  const [config, setConfig] = useState({ tone: '', rules: '', policies: {} })
-  const [features, setFeatures] = useState({
-    ask_for_pix: false,
-    require_deposit: false,
-    auto_confirmations_48h: true,
-    auto_confirmations_24h: true,
-    auto_confirmations_2h: true,
-    waitlist_enabled: false,
-    marketing_campaigns: false,
-  })
-  const [loading, setLoading] = useState(true)
-  const [saving, setSaving] = useState(false)
-  const { toast } = useToast()
+  const [empresaId, setEmpresaId] = useState<string | null>(null);
+  const [loading, setLoading] = useState(true);
+  const router = useRouter();
+  const searchParams = useSearchParams();
+  const { toast } = useToast();
+
+  // Obter tab ativa da URL (query param)
+  const activeTab = searchParams?.get("tab") || "agente";
+  const [currentTab, setCurrentTab] = useState<string>(activeTab);
 
   useEffect(() => {
-    loadEmpresaId()
-  }, [])
+    loadEmpresaId();
+  }, []);
 
   useEffect(() => {
-    if (empresaId) {
-      loadConfig()
-      loadFeatures()
-    }
-  }, [empresaId])
+    // Sincronizar tab com URL
+    const tab = searchParams?.get("tab") || "agente";
+    setCurrentTab(tab);
+  }, [searchParams]);
 
   const loadEmpresaId = async () => {
     try {
-      const { data, error } = await apiClient.get('/auth/me/empresa')
-      
-      if (error) {
-        console.error('Erro ao buscar empresa_id:', error)
-        toast({
-          title: 'Erro',
-          description: 'Não foi possível carregar os dados da empresa.',
-          variant: 'destructive',
-        })
-        setLoading(false)
-        return
-      }
-      
+      const response = await apiClient.get("/auth/me/empresa");
+      const data = response.data;
+
       if (data?.empresa_id) {
-        setEmpresaId(data.empresa_id)
+        setEmpresaId(data.empresa_id);
       } else {
         toast({
-          title: 'Aviso',
-          description: 'Empresa não encontrada. Entre em contato com o suporte.',
-          variant: 'destructive',
-        })
-        setLoading(false)
+          title: "Aviso",
+          description: "Empresa não encontrada. Entre em contato com o suporte.",
+          variant: "destructive",
+        });
+        setLoading(false);
       }
     } catch (error: any) {
-      console.error('Erro inesperado:', error)
+      console.error("Erro inesperado:", error);
       toast({
-        title: 'Erro',
-        description: error.response?.data?.message || 'Ocorreu um erro inesperado.',
-        variant: 'destructive',
-      })
-      setLoading(false)
+        title: "Erro",
+        description: error.response?.data?.message || "Não foi possível carregar os dados da empresa.",
+        variant: "destructive",
+      });
+      setLoading(false);
     }
-  }
+  };
 
-  const loadConfig = async () => {
-    setLoading(true)
-    try {
-      const { data } = await apiClient.get(`/agent-config/${empresaId}`)
-      if (data) {
-        setConfig({
-          tone: data.tone || '',
-          rules: data.rules || '',
-          policies: data.policies || {},
-        })
-      }
-    } catch (error) {
-      console.error('Error loading config:', error)
-    } finally {
-      setLoading(false)
-    }
-  }
+  const handleTabChange = (value: string) => {
+    setCurrentTab(value);
+    router.push(`/dashboard/configuracao?tab=${value}`, { scroll: false });
+  };
 
-  const loadFeatures = async () => {
-    if (!empresaId) return
-    
-    try {
-      const { data } = await apiClient.get(`/agent-config/${empresaId}/features`)
-      if (data) {
-        setFeatures(data)
-      }
-    } catch (error: any) {
-      console.error('Error loading features:', error)
-      toast({
-        title: 'Erro ao carregar funcionalidades',
-        description: error.response?.data?.message || 'Tente recarregar a página.',
-        variant: 'destructive',
-      })
-    }
-  }
-
-  const handleSaveConfig = async () => {
-    setSaving(true)
-    try {
-      await apiClient.patch(`/agent-config/${empresaId}`, config)
-      toast({
-        title: 'Configuração salva!',
-        description: 'As alterações foram salvas com sucesso.',
-      })
-    } catch (error: any) {
-      toast({
-        title: 'Erro ao salvar',
-        description: error.response?.data?.message || 'Tente novamente mais tarde.',
-        variant: 'destructive',
-      })
-    } finally {
-      setSaving(false)
-    }
-  }
-
-  const handleToggleFeature = async (key: string, value: boolean) => {
-    try {
-      await apiClient.patch(`/agent-config/${empresaId}/features`, {
-        [key]: value,
-      })
-      setFeatures({ ...features, [key]: value })
-      toast({
-        title: 'Feature atualizada',
-        description: 'A configuração foi atualizada com sucesso.',
-      })
-    } catch (error: any) {
-      toast({
-        title: 'Erro ao atualizar',
-        description: error.response?.data?.message || 'Tente novamente mais tarde.',
-        variant: 'destructive',
-      })
-    }
-  }
-
-  if (loading) {
+  if (loading && !empresaId) {
     return (
       <div className="flex items-center justify-center min-h-[400px]">
         <Loader2 className="h-8 w-8 animate-spin text-primary" />
       </div>
-    )
+    );
   }
 
   if (!empresaId) {
     return (
       <div className="space-y-6">
         <div>
-          <h1 className="text-3xl font-bold tracking-tight">Configuração do Agente</h1>
+          <h1 className="text-3xl font-bold tracking-tight">Configuração</h1>
           <p className="text-muted-foreground">
             Não foi possível carregar os dados da empresa. Por favor, recarregue a página.
           </p>
         </div>
       </div>
-    )
+    );
   }
 
   return (
     <div className="space-y-6">
       <div>
-        <h1 className="text-3xl font-bold tracking-tight">Configuração do Agente</h1>
+        <h1 className="text-3xl font-bold tracking-tight">Configuração</h1>
         <p className="text-muted-foreground">
-          Personalize o comportamento e as funcionalidades do seu agente de IA
+          Personalize o comportamento do seu agente de IA e gerencie seus serviços
         </p>
       </div>
 
-      <Card>
-        <CardHeader>
-          <CardTitle>Tom de Voz</CardTitle>
-          <CardDescription>
-            Defina como o agente deve se comunicar com os clientes
-          </CardDescription>
-        </CardHeader>
-        <CardContent>
-          <div className="space-y-2">
-            <Label htmlFor="tone">Tom de comunicação</Label>
-            <Textarea
-              id="tone"
-              value={config.tone}
-              onChange={(e) => setConfig({ ...config, tone: e.target.value })}
-              rows={4}
-              placeholder="Ex: Amigável, profissional, descontraído, acolhedor..."
-            />
-          </div>
-        </CardContent>
-      </Card>
-
-      <Card>
-        <CardHeader>
-          <CardTitle>Regras do Salão</CardTitle>
-          <CardDescription>
-            Informações importantes sobre horários, políticas e procedimentos
-          </CardDescription>
-        </CardHeader>
-        <CardContent>
-          <div className="space-y-2">
-            <Label htmlFor="rules">Regras e informações</Label>
-            <Textarea
-              id="rules"
-              value={config.rules}
-              onChange={(e) => setConfig({ ...config, rules: e.target.value })}
-              rows={6}
-              placeholder="Ex: Horário de funcionamento, políticas de cancelamento, formas de pagamento..."
-            />
-          </div>
-        </CardContent>
-      </Card>
-
-      <Card>
-        <CardHeader>
-          <CardTitle>Funcionalidades</CardTitle>
-          <CardDescription>
-            Ative ou desative funcionalidades do agente
-          </CardDescription>
-        </CardHeader>
-        <CardContent className="space-y-6">
-          <div className="flex items-center justify-between">
-            <div className="space-y-0.5">
-              <Label htmlFor="ask_for_pix">Pedir Pix após agendamento</Label>
-              <p className="text-sm text-muted-foreground">
-                O agente solicitará o Pix automaticamente após confirmar um agendamento
-              </p>
-            </div>
-            <Switch
-              id="ask_for_pix"
-              checked={features.ask_for_pix}
-              onCheckedChange={(checked) => handleToggleFeature('ask_for_pix', checked)}
-            />
-          </div>
-
-          <Separator />
-
-          <div className="flex items-center justify-between">
-            <div className="space-y-0.5">
-              <Label htmlFor="require_deposit">Exigir sinal/depósito</Label>
-              <p className="text-sm text-muted-foreground">
-                Requer pagamento de sinal para confirmar agendamento
-              </p>
-            </div>
-            <Switch
-              id="require_deposit"
-              checked={features.require_deposit}
-              onCheckedChange={(checked) => handleToggleFeature('require_deposit', checked)}
-            />
-          </div>
-
-          <Separator />
-
-          <div className="flex items-center justify-between">
-            <div className="space-y-0.5">
-              <Label htmlFor="auto_confirmations_48h">Confirmação automática 48h antes</Label>
-              <p className="text-sm text-muted-foreground">
-                Envia mensagem de confirmação 48 horas antes do agendamento
-              </p>
-            </div>
-            <Switch
-              id="auto_confirmations_48h"
-              checked={features.auto_confirmations_48h}
-              onCheckedChange={(checked) => handleToggleFeature('auto_confirmations_48h', checked)}
-            />
-          </div>
-
-          <Separator />
-
-          <div className="flex items-center justify-between">
-            <div className="space-y-0.5">
-              <Label htmlFor="auto_confirmations_24h">Confirmação automática 24h antes</Label>
-              <p className="text-sm text-muted-foreground">
-                Envia mensagem de confirmação 24 horas antes do agendamento
-              </p>
-            </div>
-            <Switch
-              id="auto_confirmations_24h"
-              checked={features.auto_confirmations_24h}
-              onCheckedChange={(checked) => handleToggleFeature('auto_confirmations_24h', checked)}
-            />
-          </div>
-
-          <Separator />
-
-          <div className="flex items-center justify-between">
-            <div className="space-y-0.5">
-              <Label htmlFor="auto_confirmations_2h">Confirmação automática 2h antes</Label>
-              <p className="text-sm text-muted-foreground">
-                Envia mensagem de confirmação 2 horas antes do agendamento
-              </p>
-            </div>
-            <Switch
-              id="auto_confirmations_2h"
-              checked={features.auto_confirmations_2h}
-              onCheckedChange={(checked) => handleToggleFeature('auto_confirmations_2h', checked)}
-            />
-          </div>
-
-          <Separator />
-
-          <div className="flex items-center justify-between">
-            <div className="space-y-0.5">
-              <Label htmlFor="waitlist_enabled">Lista de espera habilitada</Label>
-              <p className="text-sm text-muted-foreground">
-                Permite adicionar clientes à lista de espera quando não há horários disponíveis
-              </p>
-            </div>
-            <Switch
-              id="waitlist_enabled"
-              checked={features.waitlist_enabled}
-              onCheckedChange={(checked) => handleToggleFeature('waitlist_enabled', checked)}
-            />
-          </div>
-
-          <Separator />
-
-          <div className="flex items-center justify-between">
-            <div className="space-y-0.5">
-              <Label htmlFor="marketing_campaigns">Campanhas de marketing</Label>
-              <p className="text-sm text-muted-foreground">
-                Permite enviar campanhas promocionais para clientes
-              </p>
-            </div>
-            <Switch
-              id="marketing_campaigns"
-              checked={features.marketing_campaigns}
-              onCheckedChange={(checked) => handleToggleFeature('marketing_campaigns', checked)}
-            />
-          </div>
-        </CardContent>
-      </Card>
-
-      <div className="flex justify-end">
-        <Button onClick={handleSaveConfig} disabled={saving} size="lg">
-          {saving ? (
-            <>
-              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-              Salvando...
-            </>
-          ) : (
-            <>
-              <Save className="mr-2 h-4 w-4" />
-              Salvar Configuração
-            </>
-          )}
-        </Button>
-      </div>
+      <Tabs value={currentTab} onValueChange={handleTabChange} className="w-full">
+        <TabsList>
+          <TabsTrigger value="agente">Agente</TabsTrigger>
+          <TabsTrigger value="servicos">Serviços</TabsTrigger>
+        </TabsList>
+        <TabsContent value="agente" className="mt-6">
+          <AgentTab empresaId={empresaId} />
+        </TabsContent>
+        <TabsContent value="servicos" className="mt-6">
+          <ServicesTab empresaId={empresaId} />
+        </TabsContent>
+      </Tabs>
     </div>
-  )
+  );
 }

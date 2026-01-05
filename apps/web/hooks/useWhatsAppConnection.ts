@@ -35,8 +35,8 @@ export function useWhatsAppConnection() {
   // Função para buscar empresa_id
   const getEmpresaId = async (): Promise<string | null> => {
     try {
-      const { data } = await apiClient.get('/auth/me/empresa');
-      return data?.empresa_id || null;
+      const response = await apiClient.get('/auth/me/empresa');
+      return response.data?.empresa_id || null;
     } catch (error) {
       console.error('Erro ao buscar empresa_id:', error);
       return null;

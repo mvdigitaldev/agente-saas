@@ -42,18 +42,8 @@ export default function BloqueiosPage() {
 
   const loadEmpresaId = async () => {
     try {
-      const { data, error } = await apiClient.get('/auth/me/empresa')
-      
-      if (error) {
-        console.error('Erro ao buscar empresa_id:', error)
-        toast({
-          title: 'Erro',
-          description: 'Não foi possível carregar os dados da empresa.',
-          variant: 'destructive',
-        })
-        setLoading(false)
-        return
-      }
+      const response = await apiClient.get('/auth/me/empresa')
+      const data = response.data
       
       if (data?.empresa_id) {
         setEmpresaId(data.empresa_id)
@@ -79,8 +69,8 @@ export default function BloqueiosPage() {
   const loadBlockedTimes = async () => {
     setLoading(true)
     try {
-      const { data } = await apiClient.get(`/scheduling/blocked-times?empresa_id=${empresaId}`)
-      setBlockedTimes(data || [])
+      const response = await apiClient.get(`/scheduling/blocked-times?empresa_id=${empresaId}`)
+      setBlockedTimes(response.data || [])
     } catch (error) {
       console.error('Error loading blocked times:', error)
     } finally {

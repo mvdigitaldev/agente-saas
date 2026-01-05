@@ -1,6 +1,9 @@
 import axios from 'axios';
 
-const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001';
+// Usar /api como proxy para o backend através do rewrites do Next.js
+const apiUrl = typeof window !== 'undefined' 
+  ? '/api'  // No cliente, usar proxy do Next.js
+  : (process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001'); // No servidor, usar URL direta
 
 export const apiClient = axios.create({
   baseURL: apiUrl,
