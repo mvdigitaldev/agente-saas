@@ -11,6 +11,13 @@ logger = get_logger(__name__)
 class QueueConsumer:
     def __init__(self):
         redis_url = os.getenv("REDIS_URL", "redis://localhost:6379")
+        original_url = redis_url
+        
+        # Limpar espaços da URL (pode ter espaços após "default:" no Render)
+        # Remover espaços após "default:" e normalizar a URL
+        redis_url = redis_url.strip()
+        redis_url = redis_url.replace("default: ", "default:")  # Remover espaço após default:
+        redis_url = redis_url.replace("default:", "default:")  # Garantir formato correto
         
         # Parsear URL do Redis manualmente para extrair componentes
         # Upstash: rediss://default:PASSWORD@HOST:PORT (URL tem "default:" mas não passamos username)
@@ -24,16 +31,33 @@ class QueueConsumer:
             password = parsed.password
             use_ssl = redis_url.startswith("rediss://")
             
+            # Se password está None mas a URL tem "default:", tentar extrair manualmente
+            # Isso acontece quando há espaços ou caracteres especiais na URL
+            if not password and "default:" in redis_url and "@" in redis_url:
+                # Extrair password manualmente: rediss://default:PASSWORD@HOST
+                try:
+                    # Formato: rediss://default:PASSWORD@HOST:PORT
+                    parts = redis_url.split("@")
+                    if len(parts) == 2:
+                        auth_part = parts[0].replace("rediss://", "").replace("redis://", "")
+                        if "default:" in auth_part:
+                            password = auth_part.split("default:")[1]
+                            logger.info("Password extraído manualmente da URL (havia espaço ou caractere especial)")
+                except Exception as e:
+                    logger.warning(f"Erro ao extrair password manualmente: {e}")
+            
             # Validar componentes obrigatórios
             if not hostname:
                 raise ValueError("URL do Redis sem hostname")
             if use_ssl and not password:
-                raise ValueError("URL do Redis SSL sem password")
+                raise ValueError(f"URL do Redis SSL sem password. URL original: {original_url[:50]}...")
             
             # Log informativo
             logger.info(f"Conectando ao Redis - Host: {hostname}, Port: {port}, SSL: {use_ssl}")
             if password:
-                logger.info(f"Password: {'*' * min(len(password), 10)}...")
+                logger.info(f"Password extraído: {'*' * min(len(password), 10)}... (tamanho: {len(password)})")
+            else:
+                logger.warning("Password não encontrado na URL")
             
             # Criar conexão usando parâmetros individuais
             # Upstash aceita apenas autenticação por senha (sem username explícito)
@@ -51,7 +75,8 @@ class QueueConsumer:
             
         except Exception as e:
             logger.error(f"Erro ao criar cliente Redis: {e}")
-            logger.error(f"URL usada: {redis_url[:100]}...")
+            logger.error(f"URL original: {original_url[:100]}...")
+            logger.error(f"URL após limpeza: {redis_url[:100]}...")
             raise
         
         self.agent = AgentCore()
