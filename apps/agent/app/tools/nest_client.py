@@ -1,6 +1,6 @@
 import os
 import httpx
-from utils.logging import get_logger
+from app.utils.logging import get_logger
 
 logger = get_logger(__name__)
 

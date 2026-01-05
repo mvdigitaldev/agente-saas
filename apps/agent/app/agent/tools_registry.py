@@ -1,6 +1,6 @@
 import json
 from typing import Dict, List, Callable, Any, Optional
-from utils.logging import get_logger
+from app.utils.logging import get_logger
 
 logger = get_logger(__name__)
 

@@ -1,26 +1,26 @@
 """
 Módulo de tools do agente
 """
-from tools.scheduling_tools import (
+from app.tools.scheduling_tools import (
     check_available_slots_tool,
     create_appointment_tool,
     reschedule_appointment_tool,
     cancel_appointment_tool,
 )
-from tools.info_tools import (
+from app.tools.info_tools import (
     list_staff_tool,
     list_services_tool,
     list_appointments_tool,
     list_prices_tool,
 )
-from tools.payment_tools import (
+from app.tools.payment_tools import (
     check_payment_status_tool,
     create_payment_link_tool,
 )
-from tools.human_tools import request_human_handoff_tool
-from tools.media_tools import send_media_tool
-from tools.validators import get_validator
-from agent.tools_registry import ToolDefinition, get_tool_registry
+from app.tools.human_tools import request_human_handoff_tool
+from app.tools.media_tools import send_media_tool
+from app.tools.validators import get_validator
+from app.agent.tools_registry import ToolDefinition, get_tool_registry
 
 
 def register_all_tools():

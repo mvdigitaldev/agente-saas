@@ -1,12 +1,12 @@
 from typing import Dict, Any
-from tools.nest_client import NestClient
-from tools.validators import (
+from app.tools.nest_client import NestClient
+from app.tools.validators import (
     CheckAvailableSlotsInput,
     CreateAppointmentInput,
     RescheduleAppointmentInput,
     CancelAppointmentInput,
 )
-from utils.logging import get_logger
+from app.utils.logging import get_logger
 
 logger = get_logger(__name__)
 

@@ -19,7 +19,6 @@ interface AgentTabProps {
 export function AgentTab({ empresaId }: AgentTabProps) {
   const [config, setConfig] = useState({ tone: "", rules: "", policies: {} });
   const [features, setFeatures] = useState({
-    ask_for_pix: false,
     require_deposit: false,
     auto_confirmations_48h: true,
     auto_confirmations_24h: true,
@@ -184,20 +183,6 @@ export function AgentTab({ empresaId }: AgentTabProps) {
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-6">
-          <div className="flex items-center justify-between">
-            <div className="space-y-0.5">
-              <Label htmlFor="ask_for_pix">Pedir Pix após agendamento</Label>
-              <p className="text-sm text-muted-foreground">
-                O agente solicitará o Pix automaticamente após confirmar um agendamento
-              </p>
-            </div>
-            <Switch
-              id="ask_for_pix"
-              checked={features.ask_for_pix}
-              onCheckedChange={(checked) => handleToggleFeature("ask_for_pix", checked)}
-            />
-          </div>
-
           <Separator />
 
           <div className="flex items-center justify-between">

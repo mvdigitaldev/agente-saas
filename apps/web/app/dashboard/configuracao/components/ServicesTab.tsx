@@ -68,6 +68,8 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { useServices, type Service } from "../hooks/useServices";
 import { createServiceSchema, updateServiceSchema, type CreateServiceInput, type UpdateServiceInput } from "@/lib/schemas/service.schema";
 import { ServiceImageUploader } from "@/components/service-image-uploader";
+import { ImportServicesDialog } from "./ImportServicesDialog";
+import { useToast } from "@/hooks/use-toast";
 
 type ViewMode = "grid" | "list";
 
@@ -76,6 +78,7 @@ interface ServicesTabProps {
 }
 
 export function ServicesTab({ empresaId }: ServicesTabProps) {
+  const { toast } = useToast();
   const {
     services,
     loading,
@@ -90,7 +93,6 @@ export function ServicesTab({ empresaId }: ServicesTabProps) {
   const [showFilters, setShowFilters] = useState(false);
   const [searchTerm, setSearchTerm] = useState("");
   const [filterStatus, setFilterStatus] = useState<string>("all");
-  const [filterOnline, setFilterOnline] = useState<string>("all");
   const [selectedServicos, setSelectedServicos] = useState<string[]>([]);
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [servicoToDelete, setServicoToDelete] = useState<string | null>(null);
@@ -98,6 +100,7 @@ export function ServicesTab({ empresaId }: ServicesTabProps) {
   const [editingService, setEditingService] = useState<Service | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [serviceImages, setServiceImages] = useState<string[]>([]);
+  const [importDialogOpen, setImportDialogOpen] = useState(false);
 
   const form = useForm<CreateServiceInput | UpdateServiceInput>({
     resolver: zodResolver(editingService ? updateServiceSchema : createServiceSchema),
@@ -167,30 +170,50 @@ export function ServicesTab({ empresaId }: ServicesTabProps) {
 
   const onSubmit = useCallback(
     async (data: CreateServiceInput | UpdateServiceInput) => {
-      if (!empresaId) return;
+      if (!empresaId) {
+        toast({
+          title: "Erro",
+          description: "Empresa não encontrada",
+          variant: "destructive",
+        });
+        return;
+      }
 
       setIsSubmitting(true);
       try {
-        // Incluir images no payload
+        // Incluir images no payload e garantir valores padrão
         const payload = {
           ...data,
           images: serviceImages,
+          available_online: true, // Sempre true
+          show_price_online: true, // Sempre true
         };
 
         if (editingService) {
-          await updateService(editingService.service_id, payload as UpdateServiceInput);
+          const result = await updateService(editingService.service_id, payload as UpdateServiceInput);
+          if (result) {
+            handleCloseServiceDialog();
+            refetch();
+          }
         } else {
-          await createService(payload as CreateServiceInput);
+          const result = await createService(payload as CreateServiceInput);
+          if (result) {
+            handleCloseServiceDialog();
+            refetch();
+          }
         }
-        handleCloseServiceDialog();
-        refetch();
-      } catch (error) {
+      } catch (error: any) {
         console.error("Erro ao salvar serviço:", error);
+        toast({
+          title: "Erro",
+          description: error.message || "Erro ao salvar serviço",
+          variant: "destructive",
+        });
       } finally {
         setIsSubmitting(false);
       }
     },
-    [empresaId, editingService, createService, updateService, handleCloseServiceDialog, refetch, serviceImages]
+    [empresaId, editingService, createService, updateService, handleCloseServiceDialog, refetch, serviceImages, toast]
   );
 
   // Memoizar serviços filtrados
@@ -206,14 +229,9 @@ export function ServicesTab({ empresaId }: ServicesTabProps) {
         (filterStatus === "ativo" && servico.ativo) ||
         (filterStatus === "inativo" && !servico.ativo);
 
-      const matchesOnline =
-        filterOnline === "all" ||
-        (filterOnline === "sim" && servico.available_online) ||
-        (filterOnline === "nao" && !servico.available_online);
-
-      return matchesSearch && matchesStatus && matchesOnline;
+      return matchesSearch && matchesStatus;
     });
-  }, [services, searchTerm, filterStatus, filterOnline]);
+  }, [services, searchTerm, filterStatus]);
 
   // Funções memoizadas
   const handleDelete = useCallback(
@@ -302,9 +320,7 @@ export function ServicesTab({ empresaId }: ServicesTabProps) {
           <Button
             variant="outline"
             className="gap-2"
-            onClick={() => {
-              // TODO: Implementar importação
-            }}
+            onClick={() => setImportDialogOpen(true)}
           >
             <Upload className="h-4 w-4" />
             Importar
@@ -342,7 +358,7 @@ export function ServicesTab({ empresaId }: ServicesTabProps) {
         </CardHeader>
         {showFilters && (
           <CardContent>
-            <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
               <div className="space-y-2">
                 <Label htmlFor="search">Procurar por:</Label>
                 <div className="relative">
@@ -369,26 +385,12 @@ export function ServicesTab({ empresaId }: ServicesTabProps) {
                   </SelectContent>
                 </Select>
               </div>
-              <div className="space-y-2">
-                <Label htmlFor="online">Disponível Online:</Label>
-                <Select value={filterOnline} onValueChange={setFilterOnline}>
-                  <SelectTrigger id="online">
-                    <SelectValue placeholder="Todos" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="all">Todos</SelectItem>
-                    <SelectItem value="sim">Sim</SelectItem>
-                    <SelectItem value="nao">Não</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
               <div className="flex items-end gap-2">
                 <Button
                   variant="outline"
                   onClick={() => {
                     setSearchTerm("");
                     setFilterStatus("all");
-                    setFilterOnline("all");
                   }}
                   className="w-full"
                 >
@@ -623,37 +625,6 @@ export function ServicesTab({ empresaId }: ServicesTabProps) {
                 />
               </div>
 
-              <div className="flex items-center justify-between">
-                <div className="space-y-0.5">
-                  <Label htmlFor="available_online">Disponível Online</Label>
-                  <p className="text-sm text-muted-foreground">
-                    Pode ser agendado online
-                  </p>
-                </div>
-                <Switch
-                  id="available_online"
-                  checked={form.watch("available_online")}
-                  onCheckedChange={(checked) =>
-                    form.setValue("available_online", checked)
-                  }
-                />
-              </div>
-
-              <div className="flex items-center justify-between">
-                <div className="space-y-0.5">
-                  <Label htmlFor="show_price_online">Exibir Preço Online</Label>
-                  <p className="text-sm text-muted-foreground">
-                    Mostrar preço nos agendamentos online
-                  </p>
-                </div>
-                <Switch
-                  id="show_price_online"
-                  checked={form.watch("show_price_online")}
-                  onCheckedChange={(checked) =>
-                    form.setValue("show_price_online", checked)
-                  }
-                />
-              </div>
 
               <div className="flex items-center justify-between">
                 <div className="space-y-0.5">
@@ -718,6 +689,18 @@ export function ServicesTab({ empresaId }: ServicesTabProps) {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+
+      {/* Dialog de importação de serviços */}
+      {empresaId && (
+        <ImportServicesDialog
+          open={importDialogOpen}
+          onOpenChange={setImportDialogOpen}
+          empresaId={empresaId}
+          onSuccess={() => {
+            refetch();
+          }}
+        />
+      )}
     </div>
   );
 }
@@ -786,9 +769,6 @@ const ServiceCard = React.memo(
                   ? formatarPreco(service.preco)
                   : `A partir de ${formatarPreco(service.preco)}`}
               </p>
-              {service.available_online && (
-                <p className="text-primary">Disponível online</p>
-              )}
               {!service.ativo && <p className="text-destructive">Inativo</p>}
             </div>
           </div>

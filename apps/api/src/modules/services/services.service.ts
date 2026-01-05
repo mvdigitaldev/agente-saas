@@ -142,33 +142,76 @@ export class ServicesService {
   async importServices(empresaId: string, importServicesDto: ImportServicesDto) {
     const db = this.supabase.getServiceRoleClient();
 
-    const servicesToInsert = importServicesDto.services.map((service) => ({
-      empresa_id: empresaId,
-      nome: service.nome,
-      descricao: service.descricao || null,
-      preco: service.preco ? Number(service.preco) : null,
-      duracao_minutos: service.duracao_minutos,
-      image_url: service.image_url || null,
-      ativo: service.ativo ?? true,
-      available_online: service.available_online ?? true,
-      show_price_online: service.show_price_online ?? true,
-      fixed_price: service.fixed_price ?? true,
-      created_by: null,
-    }));
+    if (!importServicesDto.services || importServicesDto.services.length === 0) {
+      throw new BadRequestException('Nenhum serviço fornecido para importação');
+    }
 
-    const { data, error } = await db
-      .from('services')
-      .insert(servicesToInsert)
-      .select();
+    let importados = 0;
+    let erros = 0;
+    const errosDetalhes: string[] = [];
 
-    if (error) {
-      this.logger.error('Erro ao importar serviços:', error);
-      throw new BadRequestException('Erro ao importar serviços: ' + error.message);
+    for (let i = 0; i < importServicesDto.services.length; i++) {
+      const servicoData = importServicesDto.services[i];
+
+      try {
+        // Validar campos obrigatórios
+        if (!servicoData.nome || !servicoData.duracao_minutos) {
+          erros++;
+          errosDetalhes.push(`Linha ${i + 1}: Nome e duração são obrigatórios`);
+          continue;
+        }
+
+        if (servicoData.duracao_minutos <= 0) {
+          erros++;
+          errosDetalhes.push(`Linha ${i + 1}: Duração deve ser maior que zero`);
+          continue;
+        }
+
+        // Migrar image_url para images se fornecido
+        let images: string[] = servicoData.images || [];
+        if (servicoData.image_url && !images.length) {
+          images = [servicoData.image_url];
+        }
+
+        const dadosServico: any = {
+          empresa_id: empresaId,
+          nome: servicoData.nome.trim(),
+          duracao_minutos: parseInt(servicoData.duracao_minutos.toString()),
+          preco: servicoData.preco ? Number(servicoData.preco) : null,
+          descricao: servicoData.descricao ? servicoData.descricao.trim() : null,
+          image_url: servicoData.image_url || null, // Deprecated
+          images: images.length > 0 ? images : null,
+          ativo: servicoData.ativo ?? true,
+          available_online: servicoData.available_online ?? true,
+          show_price_online: servicoData.show_price_online ?? true,
+          fixed_price: servicoData.fixed_price ?? true,
+          created_by: null,
+        };
+
+        const { error: insertError } = await db
+          .from('services')
+          .insert(dadosServico)
+          .select()
+          .single();
+
+        if (insertError) {
+          erros++;
+          errosDetalhes.push(`Linha ${i + 1}: ${insertError.message || 'Erro ao criar serviço'}`);
+          continue;
+        }
+
+        importados++;
+      } catch (error: any) {
+        erros++;
+        errosDetalhes.push(`Linha ${i + 1}: ${error.message || 'Erro desconhecido'}`);
+      }
     }
 
     return {
-      imported: data?.length || 0,
-      services: data || [],
+      importados,
+      erros,
+      total: importServicesDto.services.length,
+      errosDetalhes: erros > 0 ? errosDetalhes : undefined,
     };
   }
 
