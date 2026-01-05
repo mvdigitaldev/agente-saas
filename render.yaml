@@ -28,11 +28,11 @@ services:
   - type: worker
     name: agente-saas-agent
     env: python
-    buildCommand: cd apps/agent && pip install -r requirements.txt
+    buildCommand: cd apps/agent && pip install --upgrade pip && pip install -r requirements.txt
     startCommand: cd apps/agent && python -m app.main
     envVars:
       - key: PYTHON_VERSION
-        value: 3.11
+        value: "3.11.9"
       - key: SUPABASE_URL
         sync: false
       - key: SUPABASE_SERVICE_ROLE_KEY
