@@ -1,0 +1,48 @@
+services:
+  # Backend NestJS
+  - type: web
+    name: agente-saas-api
+    env: node
+    buildCommand: cd apps/api && npm install && npm run build
+    startCommand: cd apps/api && npm run start
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: PORT
+        value: 10000
+      - key: SUPABASE_URL
+        sync: false
+      - key: SUPABASE_ANON_KEY
+        sync: false
+      - key: SUPABASE_SERVICE_ROLE_KEY
+        sync: false
+      - key: REDIS_URL
+        sync: false
+      - key: AGENT_API_KEY
+        sync: false
+      - key: FRONTEND_URL
+        value: https://agente-saas-web.vercel.app
+        # Atualizar com a URL real do frontend na Vercel após deploy
+
+  # Python Agent Worker
+  - type: worker
+    name: agente-saas-agent
+    env: python
+    buildCommand: cd apps/agent && pip install -r requirements.txt
+    startCommand: cd apps/agent && python -m app.main
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.11
+      - key: SUPABASE_URL
+        sync: false
+      - key: SUPABASE_SERVICE_ROLE_KEY
+        sync: false
+      - key: REDIS_URL
+        sync: false
+      - key: NEST_API_URL
+        sync: false
+      - key: AGENT_API_KEY
+        sync: false
+      - key: OPENAI_API_KEY
+        sync: false
+
