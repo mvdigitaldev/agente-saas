@@ -29,9 +29,7 @@ export default function SignupPage() {
     setLoading(true)
 
     try {
-      const { data, error } = await apiClient.post('/auth/signup', formData)
-
-      if (error) throw error
+      const { data } = await apiClient.post('/auth/signup', formData)
 
       if (data.session) {
         const { error: signInError } = await supabase.auth.setSession({

@@ -11,6 +11,7 @@ export interface Service {
   preco: number | null;
   descricao: string | null;
   available_online: boolean;
+  show_price_online: boolean;
   image_url: string | null; // Deprecated: usar images[]
   images: string[] | null;
   fixed_price: boolean;

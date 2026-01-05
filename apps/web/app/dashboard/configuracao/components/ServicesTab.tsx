@@ -99,7 +99,7 @@ export function ServicesTab({ empresaId }: ServicesTabProps) {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [serviceImages, setServiceImages] = useState<string[]>([]);
 
-  const form = useForm<CreateServiceInput>({
+  const form = useForm<CreateServiceInput | UpdateServiceInput>({
     resolver: zodResolver(editingService ? updateServiceSchema : createServiceSchema),
     defaultValues: {
       nome: "",
@@ -178,9 +178,9 @@ export function ServicesTab({ empresaId }: ServicesTabProps) {
         };
 
         if (editingService) {
-          await updateService(editingService.service_id, payload);
+          await updateService(editingService.service_id, payload as UpdateServiceInput);
         } else {
-          await createService(payload);
+          await createService(payload as CreateServiceInput);
         }
         handleCloseServiceDialog();
         refetch();
