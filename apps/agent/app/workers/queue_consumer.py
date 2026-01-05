@@ -2,6 +2,7 @@ import asyncio
 import redis.asyncio as redis
 import json
 import os
+from urllib.parse import urlparse
 from app.agent.core import AgentCore
 from app.utils.logging import get_logger
 
@@ -13,22 +14,50 @@ class QueueConsumer:
         
         # Corrigir URL do Upstash: remover username "default" se presente
         # Formato correto Upstash: rediss://:PASSWORD@HOST:PORT (sem username)
-        if redis_url.startswith("rediss://") and "default:" in redis_url:
-            # Remover "default:" da URL (Upstash não usa username)
-            redis_url = redis_url.replace("rediss://default:", "rediss://:")
-            logger.info("URL do Redis corrigida para formato Upstash (sem username)")
+        original_url = redis_url
+        if redis_url.startswith("rediss://"):
+            # Remover qualquer username da URL (Upstash não usa username)
+            # Formato esperado: rediss://default:PASSWORD@HOST:PORT
+            # Formato correto: rediss://:PASSWORD@HOST:PORT
+            try:
+                parsed = urlparse(redis_url)
+                # Se tem username (netloc contém username:password@host), remover username
+                if parsed.username and parsed.username != "":
+                    # Reconstruir URL sem username, apenas com password
+                    if parsed.password:
+                        port = f":{parsed.port}" if parsed.port else ":6379"
+                        redis_url = f"rediss://:{parsed.password}@{parsed.hostname}{port}"
+                        logger.info(f"URL do Redis corrigida: removido username '{parsed.username}'")
+                    else:
+                        logger.warning("URL do Redis tem username mas não tem password!")
+                elif "default:" in redis_url:
+                    # Fallback: remover "default:" diretamente se urlparse não funcionou
+                    redis_url = redis_url.replace("rediss://default:", "rediss://:")
+                    logger.info("URL do Redis corrigida: removido username 'default' (fallback)")
+            except Exception as e:
+                logger.warning(f"Erro ao processar URL do Redis: {e}")
+                # Fallback: tentar remover "default:" diretamente
+                if "default:" in redis_url:
+                    redis_url = redis_url.replace("rediss://default:", "rediss://:")
+                    logger.info("URL do Redis corrigida: removido username 'default' (fallback após erro)")
+        
+        logger.info(f"Conectando ao Redis (URL original: {original_url[:30]}...)")
         
         # Na versão 5.0.1 do redis, from_url detecta SSL automaticamente pela URL (rediss://)
-        # Não precisamos passar parâmetros SSL explicitamente
+        # Para Upstash, usar from_url sem parâmetros SSL adicionais
         try:
+            # Usar from_url que detecta SSL automaticamente
             self.redis_client = redis.from_url(
                 redis_url, 
                 decode_responses=True,
             )
-            logger.info("Conexão Redis inicializada com sucesso")
+            logger.info("Cliente Redis criado com sucesso")
+            logger.info(f"URL usada: {redis_url[:50]}..." if len(redis_url) > 50 else f"URL usada: {redis_url}")
         except Exception as e:
-            logger.error(f"Erro ao conectar ao Redis: {e}")
-            logger.error(f"URL usada: {redis_url[:20]}..." if len(redis_url) > 20 else f"URL usada: {redis_url}")
+            logger.error(f"Erro ao criar cliente Redis: {e}")
+            logger.error(f"URL original: {original_url[:50]}...")
+            logger.error(f"URL corrigida: {redis_url[:50]}...")
+            # Tentar criar conexão manualmente como fallback (não usar - from_url deve funcionar)
             raise
         
         self.agent = AgentCore()
@@ -36,6 +65,16 @@ class QueueConsumer:
 
     async def start(self):
         logger.info("Starting queue consumer...")
+        
+        # Testar conexão antes de começar
+        try:
+            await self.redis_client.ping()
+            logger.info("Conexão Redis testada com sucesso (PING)")
+        except Exception as e:
+            logger.error(f"Erro ao testar conexão Redis: {e}")
+            logger.error("Verifique se a REDIS_URL está correta no Render")
+            raise
+        
         while True:
             try:
                 # Consumir job do BullMQ
