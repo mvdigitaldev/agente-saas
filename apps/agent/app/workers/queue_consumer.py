@@ -10,21 +10,27 @@ logger = get_logger(__name__)
 class QueueConsumer:
     def __init__(self):
         redis_url = os.getenv("REDIS_URL", "redis://localhost:6379")
-        # Configurar SSL se for rediss:// (Upstash)
-        # Na versão 5.0.1 do redis, não usamos ssl=bool, mas sim ssl_cert_reqs
-        if redis_url.startswith("rediss://"):
-            # Para conexões SSL (Upstash), usar ssl_cert_reqs
+        
+        # Corrigir URL do Upstash: remover username "default" se presente
+        # Formato correto Upstash: rediss://:PASSWORD@HOST:PORT (sem username)
+        if redis_url.startswith("rediss://") and "default:" in redis_url:
+            # Remover "default:" da URL (Upstash não usa username)
+            redis_url = redis_url.replace("rediss://default:", "rediss://:")
+            logger.info("URL do Redis corrigida para formato Upstash (sem username)")
+        
+        # Na versão 5.0.1 do redis, from_url detecta SSL automaticamente pela URL (rediss://)
+        # Não precisamos passar parâmetros SSL explicitamente
+        try:
             self.redis_client = redis.from_url(
                 redis_url, 
                 decode_responses=True,
-                ssl_cert_reqs=None,  # Upstash usa certificado válido
             )
-        else:
-            # Para conexões não-SSL
-            self.redis_client = redis.from_url(
-                redis_url, 
-                decode_responses=True,
-            )
+            logger.info("Conexão Redis inicializada com sucesso")
+        except Exception as e:
+            logger.error(f"Erro ao conectar ao Redis: {e}")
+            logger.error(f"URL usada: {redis_url[:20]}..." if len(redis_url) > 20 else f"URL usada: {redis_url}")
+            raise
+        
         self.agent = AgentCore()
         self.queue_name = "bull:process-inbound-message:wait"
 
