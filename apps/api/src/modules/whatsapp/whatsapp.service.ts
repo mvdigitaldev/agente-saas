@@ -669,4 +669,89 @@ export class WhatsappService {
 
     return result;
   }
+
+  async sendMedia(data: {
+    empresa_id: string;
+    conversation_id?: string;
+    phone_number?: string;
+    url: string;
+    media_type?: 'image' | 'video' | 'document';
+    caption?: string;
+  }) {
+    const db = this.supabase.getServiceRoleClient();
+
+    // Buscar instância
+    const { data: instance } = await db
+      .from('whatsapp_instances')
+      .select('uazapi_instance_id, uazapi_token, status')
+      .eq('empresa_id', data.empresa_id)
+      .single();
+
+    if (!instance) {
+      throw new NotFoundException('WhatsApp instance not found');
+    }
+
+    if (instance.status !== 'connected') {
+      throw new BadRequestException('WhatsApp não está conectado');
+    }
+
+    if (!instance.uazapi_token) {
+      throw new BadRequestException('Token da instância não encontrado');
+    }
+
+    // Se conversation_id fornecido, buscar phone_number
+    let phoneNumber = data.phone_number;
+    if (!phoneNumber && data.conversation_id) {
+      const { data: conversation } = await db
+        .from('conversations')
+        .select('client_id')
+        .eq('conversation_id', data.conversation_id)
+        .single();
+
+      if (conversation) {
+        const { data: client } = await db
+          .from('clients')
+          .select('whatsapp_number')
+          .eq('client_id', conversation.client_id)
+          .single();
+
+        phoneNumber = client?.whatsapp_number;
+      }
+    }
+
+    if (!phoneNumber) {
+      throw new BadRequestException('Phone number not found');
+    }
+
+    // Formatar telefone (remover caracteres não numéricos, garantir formato 55...)
+    const formattedPhone = phoneNumber.replace(/\D/g, '');
+    if (!formattedPhone.startsWith('55') && formattedPhone.length >= 10) {
+      phoneNumber = '55' + formattedPhone;
+    } else {
+      phoneNumber = formattedPhone;
+    }
+
+    // Enviar mídia via Uazapi
+    const result = await this.uazapiService.sendMedia(
+      instance.uazapi_token,
+      phoneNumber,
+      data.url,
+      data.media_type || 'image',
+      data.caption,
+    );
+
+    // Salvar mensagem outbound
+    if (data.conversation_id) {
+      await db.from('messages').insert({
+        empresa_id: data.empresa_id,
+        conversation_id: data.conversation_id,
+        whatsapp_message_id: result.id || result.messageId || `outbound_media_${Date.now()}`,
+        direction: 'outbound',
+        role: 'assistant',
+        content: data.caption || `[${data.media_type || 'image'}]`,
+      });
+    }
+
+    return result;
+  }
 }

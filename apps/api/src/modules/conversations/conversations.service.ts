@@ -68,5 +68,35 @@ export class ConversationsService {
       message_id: message.message_id,
     };
   }
+
+  async requestHumanHandoff(data: {
+    empresa_id: string;
+    conversation_id: string;
+    reason?: string;
+  }) {
+    const db = this.supabase.getServiceRoleClient();
+
+    // Atualizar conversa para marcar como necessitando intervenção humana
+    const { data: updated } = await db
+      .from('conversations')
+      .update({
+        needs_human: true,
+        human_handoff_reason: data.reason || null,
+        human_handoff_requested_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      })
+      .eq('conversation_id', data.conversation_id)
+      .eq('empresa_id', data.empresa_id)
+      .select()
+      .single();
+
+    // TODO: Notificar equipe (webhook, email, etc.)
+
+    return {
+      success: true,
+      conversation_id: updated.conversation_id,
+      needs_human: updated.needs_human,
+    };
+  }
 }
 

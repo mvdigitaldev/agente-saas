@@ -7,12 +7,17 @@ from memory.vector_store import VectorStore
 from agent.policy import PolicyEngine
 from agent.router import Router
 from tools.nest_client import NestClient
+from tools import register_all_tools
 from utils.logging import get_logger
 
 logger = get_logger(__name__)
 
 class AgentCore:
     def __init__(self):
+        # Registrar todas as tools no registry
+        register_all_tools()
+        logger.info("All tools registered")
+        
         self.context_loader = ContextLoader()
         self.summary_writer = SummaryWriter()
         self.vector_store = VectorStore()

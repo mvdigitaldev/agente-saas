@@ -2,7 +2,10 @@ import os
 import json
 from openai import AsyncOpenAI
 from agent.policy import PolicyEngine
+from agent.tools_registry import get_tool_registry
+from memory.context_loader import ContextLoader
 from utils.logging import get_logger
+from utils.error_handler import ToolErrorHandler
 
 logger = get_logger(__name__)
 
@@ -10,6 +13,9 @@ class Router:
     def __init__(self):
         self.client = AsyncOpenAI(api_key=os.getenv("OPENAI_API_KEY"))
         self.policy_engine = PolicyEngine()
+        self.tools_registry = get_tool_registry()
+        self.context_loader = ContextLoader()
+        self.max_iterations = 5  # Prevenir loops infinitos
 
     async def process(
         self,
@@ -26,96 +32,87 @@ class Router:
         system_prompt = self._build_system_prompt(config, features, summary, lt_memory)
         messages = self._build_messages(st_memory, system_prompt)
 
-        # Tool definitions para o agente
-        tools = [
-            {
-                "type": "function",
-                "function": {
-                    "name": "get_available_slots",
-                    "description": "Buscar horários disponíveis para agendamento",
-                    "parameters": {
-                        "type": "object",
-                        "properties": {
-                            "service_id": {"type": "string"},
-                            "start_date": {"type": "string"},
-                            "end_date": {"type": "string"},
-                        },
-                        "required": ["start_date", "end_date"],
-                    },
-                },
-            },
-            {
-                "type": "function",
-                "function": {
-                    "name": "create_appointment",
-                    "description": "Criar um agendamento",
-                    "parameters": {
-                        "type": "object",
-                        "properties": {
-                            "client_id": {"type": "string"},
-                            "service_id": {"type": "string"},
-                            "start_time": {"type": "string"},
-                            "end_time": {"type": "string"},
-                        },
-                        "required": ["client_id", "service_id", "start_time", "end_time"],
-                    },
-                },
-            },
-            {
-                "type": "function",
-                "function": {
-                    "name": "create_payment_link",
-                    "description": "Criar link de pagamento Pix (só se ask_for_pix estiver habilitado)",
-                    "parameters": {
-                        "type": "object",
-                        "properties": {
-                            "appointment_id": {"type": "string"},
-                            "amount": {"type": "number"},
-                        },
-                        "required": ["appointment_id", "amount"],
-                    },
-                },
-            },
-        ]
+        # Obter tools habilitadas para a empresa
+        tools = self.tools_registry.get_openai_tools(empresa_id, features)
 
-        # Chamar LLM com tool calling
-        response = await self.client.chat.completions.create(
-            model="gpt-4-turbo-preview",
-            messages=messages,
-            tools=tools,
-            tool_choice="auto",
-        )
-
-        message = response.choices[0].message
-
-        # Processar tool calls
-        if message.tool_calls:
-            for tool_call in message.tool_calls:
-                result = await self._execute_tool(
-                    tool_call.function.name,
-                    json.loads(tool_call.function.arguments),
-                    empresa_id,
-                    conversation_id,
-                    nest_client,
-                    features,
+        # Loop de tool calling robusto
+        for iteration in range(self.max_iterations):
+            try:
+                # Chamar LLM com tool calling
+                response = await self.client.chat.completions.create(
+                    model="gpt-4-turbo-preview",
+                    messages=messages,
+                    tools=tools if tools else None,
+                    tool_choice="auto" if tools else None,
                 )
-                # Adicionar resultado ao contexto e continuar
-                messages.append({
-                    "role": "tool",
-                    "tool_call_id": tool_call.id,
-                    "content": str(result),
-                })
 
-            # Segunda chamada para obter resposta final
-            response = await self.client.chat.completions.create(
-                model="gpt-4-turbo-preview",
-                messages=messages,
-            )
-            message = response.choices[0].message
+                message = response.choices[0].message
 
+                # Se não há tool calls, retornar resposta final
+                if not message.tool_calls:
+                    return {
+                        "content": message.content,
+                        "buttons": None,
+                    }
+
+                # Executar tools
+                for tool_call in message.tool_calls:
+                    # Sempre passar contexto explícito
+                    client_id = self.context_loader.get_client_id(conversation_id)
+                    context = {
+                        "empresa_id": empresa_id,
+                        "conversation_id": conversation_id,
+                        "client_id": client_id,
+                    }
+                    
+                    # Executar tool com error handling
+                    result = await self._execute_tool_safely(
+                        tool_call,
+                        context,
+                        features,
+                    )
+                    
+                    # Adicionar resultado ao contexto
+                    messages.append({
+                        "role": "tool",
+                        "tool_call_id": tool_call.id,
+                        "content": result,
+                    })
+
+                # Adicionar mensagem do LLM ao histórico (com tool_calls se houver)
+                message_dict = {
+                    "role": message.role,
+                    "content": message.content or "",
+                }
+                if message.tool_calls:
+                    message_dict["tool_calls"] = [
+                        {
+                            "id": tc.id,
+                            "type": tc.type,
+                            "function": {
+                                "name": tc.function.name,
+                                "arguments": tc.function.arguments,
+                            },
+                        }
+                        for tc in message.tool_calls
+                    ]
+                messages.append(message_dict)
+
+            except Exception as e:
+                logger.error(f"Error in tool calling loop (iteration {iteration + 1}): {e}", exc_info=True)
+                # Se erro crítico, retornar mensagem de erro
+                if iteration == self.max_iterations - 1:
+                    return {
+                        "content": "Desculpe, ocorreu um erro ao processar sua solicitação. Por favor, tente novamente ou solicite ajuda humana.",
+                        "buttons": None,
+                    }
+                continue
+
+        # Se chegou aqui, excedeu max_iterations
+        logger.warning(f"Max iterations reached for conversation {conversation_id}")
         return {
-            "content": message.content,
-            "buttons": None,  # Pode ser implementado depois
+            "content": "Desculpe, não consegui processar sua solicitação completamente. Por favor, reformule sua pergunta ou solicite ajuda humana.",
+            "buttons": None,
         }
 
     def _build_system_prompt(self, config: dict, features: dict, summary: str, lt_memory: list):
@@ -151,44 +148,45 @@ IMPORTANTE: Se ask_for_pix estiver False, NUNCA chame create_payment_link. Apena
             })
         return messages
 
-    async def _execute_tool(
+    async def _execute_tool_safely(
         self,
-        tool_name: str,
-        args: dict,
-        empresa_id: str,
-        conversation_id: str,
-        nest_client,
+        tool_call,
+        context: dict,
         features: dict,
-    ):
-        if tool_name == "get_available_slots":
-            return await nest_client.get_available_slots({
-                "empresa_id": empresa_id,
-                **args,
-            })
-
-        elif tool_name == "create_appointment":
-            result = await nest_client.create_appointment({
-                "empresa_id": empresa_id,
-                **args,
-            })
-            # Se ask_for_pix estiver ON, criar link de pagamento
-            if features.get("ask_for_pix") and result.get("appointment_id"):
-                payment_link = await nest_client.create_payment_link({
-                    "empresa_id": empresa_id,
-                    "appointment_id": result["appointment_id"],
-                    "amount": args.get("amount", 0),
-                })
-                result["payment_link"] = payment_link
-            return result
-
-        elif tool_name == "create_payment_link":
-            # Verificar se ask_for_pix está habilitado
-            if not features.get("ask_for_pix"):
-                return {"error": "ask_for_pix está desabilitado"}
-            return await nest_client.create_payment_link({
-                "empresa_id": empresa_id,
-                **args,
-            })
-
-        return {"error": f"Unknown tool: {tool_name}"}
+    ) -> str:
+        """
+        Executa tool com error handling robusto
+        
+        Args:
+            tool_call: Tool call do OpenAI
+            context: Contexto explícito (empresa_id, conversation_id, client_id)
+            features: Features habilitadas
+        
+        Returns:
+            JSON string com resultado ou erro formatado
+        """
+        tool_name = tool_call.function.name
+        
+        try:
+            # Parse arguments
+            args = json.loads(tool_call.function.arguments)
+        except json.JSONDecodeError as e:
+            logger.error(f"Error parsing tool arguments for {tool_name}: {e}")
+            error_result = {
+                "error_type": "validation_error",
+                "message": f"Argumentos inválidos: {str(e)}",
+                "suggestion": "Verifique os parâmetros fornecidos",
+            }
+            return json.dumps(error_result, ensure_ascii=False)
+        
+        # Executar tool via registry
+        result = await self.tools_registry.execute_tool(
+            name=tool_name,
+            args=args,
+            context=context,
+            features=features,
+        )
+        
+        logger.info(f"Executed tool {tool_name} for empresa {context['empresa_id']}")
+        return result
 

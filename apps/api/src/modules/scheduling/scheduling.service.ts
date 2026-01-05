@@ -1,4 +1,4 @@
-import { Injectable, BadRequestException } from '@nestjs/common';
+import { Injectable, BadRequestException, NotFoundException } from '@nestjs/common';
 import { SupabaseService } from '../../database/supabase.service';
 import { CreateAppointmentDto } from './dto/create-appointment.dto';
 import { CreateBlockedTimeDto } from './dto/create-blocked-time.dto';
@@ -154,6 +154,205 @@ export class SchedulingService {
       .single();
 
     return link;
+  }
+
+  async rescheduleAppointment(appointmentId: string, empresaId: string, data: { start_time: string; end_time: string }) {
+    const db = this.supabase.getServiceRoleClient();
+
+    // Verificar se agendamento existe e pertence à empresa
+    const { data: appointment } = await db
+      .from('appointments')
+      .select('*')
+      .eq('appointment_id', appointmentId)
+      .eq('empresa_id', empresaId)
+      .single();
+
+    if (!appointment) {
+      throw new NotFoundException('Agendamento não encontrado');
+    }
+
+    // Verificar se não conflita com bloqueios
+    const { data: conflictingBlock } = await db
+      .from('blocked_times')
+      .select('*')
+      .eq('empresa_id', empresaId)
+      .or(`start_time.lte.${data.end_time},end_time.gte.${data.start_time}`)
+      .single();
+
+    if (conflictingBlock) {
+      throw new BadRequestException('Novo horário está bloqueado');
+    }
+
+    // Verificar conflitos com outros agendamentos
+    const { data: conflictingAppointment } = await db
+      .from('appointments')
+      .select('*')
+      .eq('empresa_id', empresaId)
+      .neq('appointment_id', appointmentId)
+      .in('status', ['scheduled', 'confirmed'])
+      .or(`start_time.lte.${data.end_time},end_time.gte.${data.start_time}`)
+      .single();
+
+    if (conflictingAppointment) {
+      throw new BadRequestException('Novo horário conflita com outro agendamento');
+    }
+
+    // Atualizar agendamento
+    const { data: updated } = await db
+      .from('appointments')
+      .update({
+        start_time: data.start_time,
+        end_time: data.end_time,
+        updated_at: new Date().toISOString(),
+      })
+      .eq('appointment_id', appointmentId)
+      .eq('empresa_id', empresaId)
+      .select()
+      .single();
+
+    return updated;
+  }
+
+  async cancelAppointment(appointmentId: string, empresaId: string) {
+    const db = this.supabase.getServiceRoleClient();
+
+    // Verificar se agendamento existe e pertence à empresa
+    const { data: appointment } = await db
+      .from('appointments')
+      .select('*')
+      .eq('appointment_id', appointmentId)
+      .eq('empresa_id', empresaId)
+      .single();
+
+    if (!appointment) {
+      throw new NotFoundException('Agendamento não encontrado');
+    }
+
+    if (appointment.status === 'cancelled') {
+      throw new BadRequestException('Agendamento já está cancelado');
+    }
+
+    // Cancelar agendamento
+    const { data: cancelled } = await db
+      .from('appointments')
+      .update({
+        status: 'cancelled',
+        cancelled_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      })
+      .eq('appointment_id', appointmentId)
+      .eq('empresa_id', empresaId)
+      .select()
+      .single();
+
+    return cancelled;
+  }
+
+  async listAppointments(empresaId: string, filters: { client_id?: string; status?: string; start_date?: string; end_date?: string }) {
+    const db = this.supabase.getServiceRoleClient();
+
+    let query = db
+      .from('appointments')
+      .select('*')
+      .eq('empresa_id', empresaId);
+
+    if (filters.client_id) {
+      query = query.eq('client_id', filters.client_id);
+    }
+
+    if (filters.status) {
+      query = query.eq('status', filters.status);
+    }
+
+    if (filters.start_date) {
+      query = query.gte('start_time', filters.start_date);
+    }
+
+    if (filters.end_date) {
+      query = query.lte('end_time', filters.end_date);
+    }
+
+    const { data } = await query.order('start_time', { ascending: true });
+
+    return { appointments: data || [] };
+  }
+
+  async listStaff(empresaId: string) {
+    const db = this.supabase.getServiceRoleClient();
+
+    const { data } = await db
+      .from('staff')
+      .select('*')
+      .eq('empresa_id', empresaId)
+      .eq('ativo', true)
+      .order('nome', { ascending: true });
+
+    return { staff: data || [] };
+  }
+
+  async listServices(empresaId: string, activeOnly: boolean = true) {
+    const db = this.supabase.getServiceRoleClient();
+
+    let query = db
+      .from('services')
+      .select('*')
+      .eq('empresa_id', empresaId);
+
+    if (activeOnly) {
+      query = query.eq('ativo', true);
+    }
+
+    const { data } = await query.order('nome', { ascending: true });
+
+    return { services: data || [] };
+  }
+
+  async checkPaymentStatus(paymentId: string, empresaId: string) {
+    const db = this.supabase.getServiceRoleClient();
+
+    // Tentar buscar por payment_link_id primeiro
+    let { data: paymentLink } = await db
+      .from('payment_links')
+      .select('*')
+      .eq('payment_link_id', paymentId)
+      .eq('empresa_id', empresaId)
+      .single();
+
+    // Se não encontrou, tentar por appointment_id
+    if (!paymentLink) {
+      const { data: appointment } = await db
+        .from('appointments')
+        .select('appointment_id')
+        .eq('appointment_id', paymentId)
+        .eq('empresa_id', empresaId)
+        .single();
+
+      if (appointment) {
+        const { data: link } = await db
+          .from('payment_links')
+          .select('*')
+          .eq('appointment_id', appointment.appointment_id)
+          .eq('empresa_id', empresaId)
+          .order('created_at', { ascending: false })
+          .limit(1)
+          .single();
+
+        paymentLink = link;
+      }
+    }
+
+    if (!paymentLink) {
+      throw new NotFoundException('Pagamento não encontrado');
+    }
+
+    return {
+      payment_link_id: paymentLink.payment_link_id,
+      appointment_id: paymentLink.appointment_id,
+      amount: paymentLink.amount,
+      status: paymentLink.status,
+      url: paymentLink.url,
+      created_at: paymentLink.created_at,
+    };
   }
 }
 

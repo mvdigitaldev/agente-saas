@@ -136,4 +136,21 @@ export class WhatsappSendController {
   async sendMessage(@Body() dto: SendMessageDto) {
     return this.whatsappService.sendMessage(dto);
   }
+
+  /**
+   * Envia mídia (imagem, vídeo, documento)
+   */
+  @Post('send-media')
+  async sendMedia(
+    @Body() data: {
+      empresa_id: string;
+      conversation_id?: string;
+      phone_number?: string;
+      url: string;
+      media_type?: 'image' | 'video' | 'document';
+      caption?: string;
+    },
+  ) {
+    return this.whatsappService.sendMedia(data);
+  }
 }

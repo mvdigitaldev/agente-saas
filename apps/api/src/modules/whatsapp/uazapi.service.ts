@@ -456,6 +456,61 @@ export class UazapiService {
   }
 
   /**
+   * Enviar mídia (imagem, vídeo, documento)
+   * Documentação: https://docs.uazapi.com/
+   * Endpoint: POST /send/media
+   * Header: token (instance token)
+   * @param token Token da instância
+   * @param phone Número de telefone (formato: 5511999999999)
+   * @param url URL da mídia
+   * @param mediaType Tipo de mídia (image, video, document)
+   * @param caption Legenda opcional
+   */
+  async sendMedia(
+    token: string,
+    phone: string,
+    url: string,
+    mediaType: 'image' | 'video' | 'document' = 'image',
+    caption?: string,
+  ): Promise<any> {
+    try {
+      const payload: any = {
+        number: phone,
+        mediatype: mediaType,
+        media: url,
+      };
+
+      if (caption) {
+        payload.caption = caption;
+      }
+
+      const response = await this.axiosInstance.post(
+        '/send/media',
+        payload,
+        {
+          headers: {
+            token,
+          },
+        },
+      );
+
+      return response.data;
+    } catch (error: any) {
+      this.logger.error(`Erro ao enviar mídia: ${error.message}`, error.stack);
+      if (error.response) {
+        throw new HttpException(
+          `Erro ao enviar mídia: ${error.response.data?.message || error.message}`,
+          error.response.status || HttpStatus.INTERNAL_SERVER_ERROR,
+        );
+      }
+      throw new HttpException(
+        `Erro ao enviar mídia: ${error.message}`,
+        HttpStatus.INTERNAL_SERVER_ERROR,
+      );
+    }
+  }
+
+  /**
    * Gerar URL do webhook com instance_id
    */
   generateWebhookUrl(instanceId: string): string {
