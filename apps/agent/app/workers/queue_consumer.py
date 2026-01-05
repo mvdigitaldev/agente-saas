@@ -13,7 +13,7 @@ class QueueConsumer:
         redis_url = os.getenv("REDIS_URL", "redis://localhost:6379")
         
         # Parsear URL do Redis manualmente para extrair componentes
-        # Upstash requer formato: rediss://default:PASSWORD@HOST:PORT
+        # Upstash: rediss://default:PASSWORD@HOST:PORT (URL tem "default:" mas não passamos username)
         # Desenvolvimento local: redis://localhost:6379 (sem username/password)
         try:
             parsed = urlparse(redis_url)
@@ -22,7 +22,6 @@ class QueueConsumer:
             hostname = parsed.hostname
             port = parsed.port or 6379
             password = parsed.password
-            username = parsed.username  # "default" para Upstash, None para local
             use_ssl = redis_url.startswith("rediss://")
             
             # Validar componentes obrigatórios
@@ -33,19 +32,17 @@ class QueueConsumer:
             
             # Log informativo
             logger.info(f"Conectando ao Redis - Host: {hostname}, Port: {port}, SSL: {use_ssl}")
-            if username:
-                logger.info(f"Username: {username}")
             if password:
                 logger.info(f"Password: {'*' * min(len(password), 10)}...")
             
             # Criar conexão usando parâmetros individuais
-            # Isso funciona melhor com Upstash que requer username "default"
+            # Upstash aceita apenas autenticação por senha (sem username explícito)
+            # Mesmo que a URL tenha "default:", não passamos username como parâmetro
             # Usar redis.asyncio.Redis para versão assíncrona
             self.redis_client = redis.Redis(
                 host=hostname,
                 port=port,
-                password=password,
-                username=username,  # "default" para Upstash, None para local
+                password=password,  # Apenas password - Upstash não aceita username explícito
                 ssl=use_ssl,
                 ssl_cert_reqs=None if use_ssl else None,  # Não validar certificado SSL
                 decode_responses=True,
