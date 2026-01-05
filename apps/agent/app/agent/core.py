@@ -1,14 +1,12 @@
 import os
-import sys
-sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from memory.context_loader import ContextLoader
-from memory.summary_writer import SummaryWriter
-from memory.vector_store import VectorStore
-from agent.policy import PolicyEngine
-from agent.router import Router
-from tools.nest_client import NestClient
-from tools import register_all_tools
-from utils.logging import get_logger
+from app.memory.context_loader import ContextLoader
+from app.memory.summary_writer import SummaryWriter
+from app.memory.vector_store import VectorStore
+from app.agent.policy import PolicyEngine
+from app.agent.router import Router
+from app.tools.nest_client import NestClient
+from app.tools import register_all_tools
+from app.utils.logging import get_logger
 
 logger = get_logger(__name__)
 

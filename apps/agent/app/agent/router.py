@@ -1,11 +1,11 @@
 import os
 import json
 from openai import AsyncOpenAI
-from agent.policy import PolicyEngine
-from agent.tools_registry import get_tool_registry
-from memory.context_loader import ContextLoader
-from utils.logging import get_logger
-from utils.error_handler import ToolErrorHandler
+from app.agent.policy import PolicyEngine
+from app.agent.tools_registry import get_tool_registry
+from app.memory.context_loader import ContextLoader
+from app.utils.logging import get_logger
+from app.utils.error_handler import ToolErrorHandler
 
 logger = get_logger(__name__)
 

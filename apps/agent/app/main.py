@@ -1,6 +1,6 @@
 import asyncio
 import os
-from workers.queue_consumer import QueueConsumer
+from app.workers.queue_consumer import QueueConsumer
 
 async def main():
     consumer = QueueConsumer()

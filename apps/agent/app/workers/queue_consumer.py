@@ -2,10 +2,8 @@ import asyncio
 import redis.asyncio as redis
 import json
 import os
-import sys
-sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from agent.core import AgentCore
-from utils.logging import get_logger
+from app.agent.core import AgentCore
+from app.utils.logging import get_logger
 
 logger = get_logger(__name__)
 
