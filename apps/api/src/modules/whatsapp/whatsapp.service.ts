@@ -196,7 +196,8 @@ export class WhatsappService {
       throw new BadRequestException('ID da instância não retornado pelo Uazapi');
     }
 
-    // 2. Chamar /instance/connect (sem phone) para gerar QR code
+    // 2. Chamar /instance/connect (sem phone) para gerar QR code PRIMEIRO
+    // IMPORTANTE: Conectar antes de configurar webhook para evitar problemas de sincronização
     let connectResponse;
     try {
       this.logger.log(`Conectando instância ${instanceName} no Uazapi para gerar QR code`);
@@ -217,6 +218,20 @@ export class WhatsappService {
       throw error;
     }
 
+    // 3. Configurar webhook APÓS conectar (quando instância está em estado 'connecting' ou 'connected')
+    const webhookUrl = this.uazapiService.generateWebhookUrl(uazapiInstanceId);
+    try {
+      await this.uazapiService.setWebhook(instanceToken, webhookUrl, {
+        enabled: true,
+        events: ['messages', 'connection'],
+        excludeMessages: ['wasSentByApi', 'isGroupYes'],
+      });
+      this.logger.log(`Webhook configurado após conectar: ${webhookUrl}`);
+    } catch (error) {
+      this.logger.error('Erro ao configurar webhook após conectar:', error);
+      // Não falhar criação se webhook falhar, mas logar o erro
+    }
+
     // Calcular data de expiração (2 minutos a partir de agora)
     const expiresAt = new Date();
     expiresAt.setMinutes(expiresAt.getMinutes() + 2);
@@ -225,7 +240,7 @@ export class WhatsappService {
     const isConnected = connectResponse.connected && connectResponse.loggedIn;
     const initialStatus = isConnected ? 'connected' : 'connecting';
 
-    // 3. Salvar conexão no banco (igual ao iAgenda)
+    // 4. Salvar conexão no banco (igual ao iAgenda)
     // Na criação inicial, o número ainda não existe (vem depois quando QR code é escaneado, em status.jid.user via /instance/status)
     const connectionData: any = {
       empresa_id: dto.empresa_id,
@@ -237,7 +252,7 @@ export class WhatsappService {
       qr_code_url: connectResponse.instance?.qrcode || undefined,
       qr_code_expires_at: expiresAt.toISOString(),
       connected_at: isConnected ? new Date().toISOString() : undefined,
-      webhook_url: isConnected ? this.uazapiService.generateWebhookUrl(uazapiInstanceId) : undefined,
+      webhook_url: webhookUrl, // Sempre salvar webhook_url (já configurado acima)
     };
 
     if (existing) {
@@ -254,14 +269,7 @@ export class WhatsappService {
         throw new BadRequestException('Erro ao atualizar conexão WhatsApp');
       }
 
-      // Configurar webhook se conectado
-      if (isConnected && connectionData.webhook_url) {
-        try {
-          await this.uazapiService.setWebhook(instanceToken, connectionData.webhook_url);
-        } catch (error) {
-          this.logger.error('Erro ao configurar webhook:', error);
-        }
-      }
+      // Webhook já foi configurado na criação, não precisa configurar novamente
 
       return {
         instance_id: updated.instance_id,
@@ -284,14 +292,7 @@ export class WhatsappService {
         throw new BadRequestException('Erro ao criar conexão WhatsApp');
       }
 
-      // Configurar webhook se conectado
-      if (isConnected && connectionData.webhook_url) {
-        try {
-          await this.uazapiService.setWebhook(instanceToken, connectionData.webhook_url);
-        } catch (error) {
-          this.logger.error('Erro ao configurar webhook:', error);
-        }
-      }
+      // Webhook já foi configurado na criação, não precisa configurar novamente
 
       return {
         instance_id: created.instance_id,
@@ -357,7 +358,7 @@ export class WhatsappService {
     // Buscar instância e validar que pertence à empresa
     const { data: instance } = await db
       .from('whatsapp_instances')
-      .select('uazapi_instance_id, uazapi_token, empresa_id, phone_number, status, connected_at, instance_name')
+      .select('uazapi_instance_id, uazapi_token, empresa_id, phone_number, status, connected_at, instance_name, webhook_url')
       .eq('instance_id', instanceId)
       .eq('empresa_id', empresaId)
       .single();
@@ -424,16 +425,24 @@ export class WhatsappService {
         last_sync_at: new Date().toISOString(),
       };
 
-      // Configurar webhook se conectado e ainda não configurado
-      if (newStatus === 'connected' && phoneNumber) {
+      // Garantir webhook configurado se conectado (backup caso tenha falhado na criação)
+      if (newStatus === 'connected' && phoneNumber && !instance.webhook_url) {
         const webhookUrl = this.uazapiService.generateWebhookUrl(instance.uazapi_instance_id);
         updateData.webhook_url = webhookUrl;
         
         try {
-          await this.uazapiService.setWebhook(instance.uazapi_token, webhookUrl);
+          await this.uazapiService.setWebhook(instance.uazapi_token, webhookUrl, {
+            enabled: true,
+            events: ['messages', 'connection'],
+            excludeMessages: ['wasSentByApi', 'isGroupYes'],
+          });
+          this.logger.log(`Webhook configurado no status update (backup): ${webhookUrl}`);
         } catch (error) {
-          this.logger.error('Erro ao configurar webhook:', error);
+          this.logger.error('Erro ao configurar webhook no status update:', error);
         }
+      } else if (newStatus === 'connected' && phoneNumber) {
+        // Atualizar webhook_url no banco mesmo se já estava configurado
+        updateData.webhook_url = instance.webhook_url || this.uazapiService.generateWebhookUrl(instance.uazapi_instance_id);
       }
 
       const { data: updated, error: updateError } = await db

@@ -351,19 +351,35 @@ export class UazapiService {
 
   /**
    * Configurar webhook para a instância
-   * Documentação: https://docs.uazapi.com/
-   * Endpoint: POST /instance/webhook
+   * Documentação: https://docs.uazapi.com/endpoint/post/webhook
+   * Endpoint: POST /webhook
    * Header: token (instance token)
    * @param token Token da instância
    * @param webhookUrl URL do webhook
+   * @param options Opções do webhook (enabled, events, excludeMessages)
    */
-  async setWebhook(token: string, webhookUrl: string): Promise<void> {
+  async setWebhook(
+    token: string,
+    webhookUrl: string,
+    options?: {
+      enabled?: boolean;
+      events?: string[];
+      excludeMessages?: string[];
+    },
+  ): Promise<void> {
     try {
-      this.logger.log(`Configurando webhook: ${webhookUrl}`);
+      const payload = {
+        enabled: options?.enabled ?? true,
+        url: webhookUrl,
+        events: options?.events ?? ['messages', 'connection'],
+        excludeMessages: options?.excludeMessages ?? ['wasSentByApi', 'isGroupYes'],
+      };
+
+      this.logger.log(`Configurando webhook: ${webhookUrl}`, { payload });
 
       await this.axiosInstance.post(
-        '/instance/webhook',
-        { webhookUrl },
+        '/webhook',
+        payload,
         {
           headers: {
             token,
