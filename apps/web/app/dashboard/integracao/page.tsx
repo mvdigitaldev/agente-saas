@@ -198,10 +198,17 @@ export default function IntegracaoPage() {
     }
   };
 
-  // Fechar modal apenas quando conexão for estabelecida (não fechar quando desconectado, pois pode estar iniciando conexão)
+  // Fechar modal automaticamente quando conexão for estabelecida
   useEffect(() => {
     if (connection?.status === 'connected') {
+      // Fechar modal imediatamente quando conectado
       setQrModalOpen(false);
+      // Limpar QR code quando conectado
+      if (timeoutRef.current) {
+        clearInterval(timeoutRef.current);
+        timeoutRef.current = null;
+      }
+      setTimeRemaining(null);
     }
   }, [connection?.status]);
 

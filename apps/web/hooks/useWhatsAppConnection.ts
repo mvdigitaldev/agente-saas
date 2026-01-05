@@ -63,6 +63,10 @@ export function useWhatsAppConnection() {
       };
 
       const previousStatus = connection?.status;
+      
+      // Se o status mudou de connecting para connected, retornar flag especial ANTES de atualizar estado
+      const statusChanged = previousStatus === 'connecting' && statusData.status === 'connected';
+      
       setConnection(statusData);
       
       // Atualizar QR code apenas se status for connecting
@@ -72,8 +76,8 @@ export function useWhatsAppConnection() {
         setQrCode(null); // Limpar QR code quando não está mais conectando
       }
 
-      // Se o status mudou de connecting para connected, retornar flag especial
-      if (previousStatus === 'connecting' && statusData.status === 'connected') {
+      // Retornar flag especial se status mudou
+      if (statusChanged) {
         return { ...statusData, _statusChanged: true };
       }
       
@@ -157,7 +161,7 @@ export function useWhatsAppConnection() {
   // Polling quando status é 'connecting' - usa fetchStatusSilent para evitar piscadas
   useEffect(() => {
     if (connection?.status === 'connecting') {
-      // Polling a cada 3 segundos (mais frequente para detectar conexão mais rápido)
+      // Polling a cada 2 segundos (mais frequente para detectar conexão mais rápido)
       pollingIntervalRef.current = setInterval(async () => {
         try {
           const updatedStatus = await fetchStatusSilent();
@@ -178,7 +182,7 @@ export function useWhatsAppConnection() {
         } catch (error) {
           console.error('Erro no polling:', error);
         }
-      }, 3000);
+      }, 2000); // Reduzido para 2 segundos para detectar mais rápido
     } else {
       // Parar polling quando não está conectando
       if (pollingIntervalRef.current) {
