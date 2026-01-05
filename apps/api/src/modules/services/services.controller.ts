@@ -56,5 +56,23 @@ export class ServicesController {
   ) {
     return this.servicesService.importServices(empresaId, importServicesDto);
   }
+
+  @Post(':id/images')
+  addImage(
+    @Query('empresa_id') empresaId: string,
+    @Param('id') id: string,
+    @Body('image_url') imageUrl: string,
+  ) {
+    return this.servicesService.addImage(empresaId, id, imageUrl);
+  }
+
+  @Delete(':id/images')
+  removeImage(
+    @Query('empresa_id') empresaId: string,
+    @Param('id') id: string,
+    @Body('image_url') imageUrl: string,
+  ) {
+    return this.servicesService.removeImage(empresaId, id, imageUrl);
+  }
 }
 

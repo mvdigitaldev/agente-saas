@@ -1,4 +1,4 @@
-import { IsString, IsOptional, IsNumber, IsBoolean, Min, MaxLength } from 'class-validator';
+import { IsString, IsOptional, IsNumber, IsBoolean, Min, MaxLength, IsArray } from 'class-validator';
 import { CreateServiceDto } from './create-service.dto';
 
 // Como alternativa ao PartialType, definimos manualmente todos os campos como opcionais
@@ -25,7 +25,12 @@ export class UpdateServiceDto {
 
   @IsOptional()
   @IsString()
-  image_url?: string;
+  image_url?: string; // Deprecated: usar images[]
+
+  @IsOptional()
+  @IsArray()
+  @IsString({ each: true })
+  images?: string[];
 
   @IsOptional()
   @IsBoolean()

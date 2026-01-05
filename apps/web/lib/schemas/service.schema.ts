@@ -34,6 +34,10 @@ export const createServiceSchema = z.object({
       "URL deve usar protocolo HTTPS"
     )
     .optional()
+    .nullable(), // Deprecated: usar images[]
+  images: z
+    .array(z.string().url("URL de imagem inválida"))
+    .optional()
     .nullable(),
   ativo: z.boolean().optional().default(true),
   available_online: z.boolean().optional().default(true),

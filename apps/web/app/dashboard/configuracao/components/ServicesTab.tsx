@@ -67,6 +67,7 @@ import {
 import { Checkbox } from "@/components/ui/checkbox";
 import { useServices, type Service } from "../hooks/useServices";
 import { createServiceSchema, updateServiceSchema, type CreateServiceInput, type UpdateServiceInput } from "@/lib/schemas/service.schema";
+import { ServiceImageUploader } from "@/components/service-image-uploader";
 
 type ViewMode = "grid" | "list";
 
@@ -96,6 +97,7 @@ export function ServicesTab({ empresaId }: ServicesTabProps) {
   const [serviceDialogOpen, setServiceDialogOpen] = useState(false);
   const [editingService, setEditingService] = useState<Service | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [serviceImages, setServiceImages] = useState<string[]>([]);
 
   const form = useForm<CreateServiceInput>({
     resolver: zodResolver(editingService ? updateServiceSchema : createServiceSchema),
@@ -114,24 +116,35 @@ export function ServicesTab({ empresaId }: ServicesTabProps) {
 
   useEffect(() => {
     if (editingService) {
+      // Migrar image_url para images se necessário
+      const images = (editingService.images as string[]) || [];
+      const migratedImages = images.length > 0 
+        ? images 
+        : (editingService.image_url ? [editingService.image_url] : []);
+      
+      setServiceImages(migratedImages);
+      
       form.reset({
         nome: editingService.nome,
         descricao: editingService.descricao || "",
         preco: editingService.preco || 0,
         duracao_minutos: editingService.duracao_minutos,
-        image_url: editingService.image_url || "",
+        image_url: editingService.image_url || "", // Manter para compatibilidade
+        images: migratedImages,
         ativo: editingService.ativo,
         available_online: editingService.available_online,
         show_price_online: editingService.show_price_online ?? true,
         fixed_price: editingService.fixed_price,
       });
     } else {
+      setServiceImages([]);
       form.reset({
         nome: "",
         descricao: "",
         preco: 0,
         duracao_minutos: 30,
         image_url: "",
+        images: [],
         ativo: true,
         available_online: true,
         show_price_online: true,
@@ -158,10 +171,16 @@ export function ServicesTab({ empresaId }: ServicesTabProps) {
 
       setIsSubmitting(true);
       try {
+        // Incluir images no payload
+        const payload = {
+          ...data,
+          images: serviceImages,
+        };
+
         if (editingService) {
-          await updateService(editingService.service_id, data);
+          await updateService(editingService.service_id, payload);
         } else {
-          await createService(data);
+          await createService(payload);
         }
         handleCloseServiceDialog();
         refetch();
@@ -171,7 +190,7 @@ export function ServicesTab({ empresaId }: ServicesTabProps) {
         setIsSubmitting(false);
       }
     },
-    [empresaId, editingService, createService, updateService, handleCloseServiceDialog, refetch]
+    [empresaId, editingService, createService, updateService, handleCloseServiceDialog, refetch, serviceImages]
   );
 
   // Memoizar serviços filtrados
@@ -559,20 +578,19 @@ export function ServicesTab({ empresaId }: ServicesTabProps) {
                 )}
               </div>
 
-              <div className="space-y-2">
-                <Label htmlFor="image_url">URL da Imagem</Label>
-                <Input
-                  id="image_url"
-                  type="url"
-                  {...form.register("image_url")}
-                  placeholder="https://exemplo.com/imagem.jpg"
+            </div>
+
+            <div className="space-y-2">
+              <Label>Imagens do Serviço</Label>
+              {empresaId && (
+                <ServiceImageUploader
+                  empresaId={empresaId}
+                  serviceId={editingService?.service_id}
+                  images={serviceImages}
+                  onImagesChange={setServiceImages}
+                  maxImages={10}
                 />
-                {form.formState.errors.image_url && (
-                  <p className="text-sm text-destructive">
-                    {form.formState.errors.image_url.message}
-                  </p>
-                )}
-              </div>
+              )}
             </div>
 
             <div className="space-y-2">

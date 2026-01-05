@@ -35,8 +35,13 @@ class Router:
         # Obter tools habilitadas para a empresa
         tools = self.tools_registry.get_openai_tools(empresa_id, features)
 
+        # Obter max_iterations das features (padrão: 5)
+        max_iterations = features.get('max_tool_iterations', self.max_iterations)
+        if not isinstance(max_iterations, int) or max_iterations < 1:
+            max_iterations = self.max_iterations
+
         # Loop de tool calling robusto
-        for iteration in range(self.max_iterations):
+        for iteration in range(max_iterations):
             try:
                 # Chamar LLM com tool calling
                 response = await self.client.chat.completions.create(
@@ -101,7 +106,7 @@ class Router:
             except Exception as e:
                 logger.error(f"Error in tool calling loop (iteration {iteration + 1}): {e}", exc_info=True)
                 # Se erro crítico, retornar mensagem de erro
-                if iteration == self.max_iterations - 1:
+                if iteration == max_iterations - 1:
                     return {
                         "content": "Desculpe, ocorreu um erro ao processar sua solicitação. Por favor, tente novamente ou solicite ajuda humana.",
                         "buttons": None,

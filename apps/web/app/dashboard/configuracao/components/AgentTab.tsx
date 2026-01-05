@@ -26,6 +26,10 @@ export function AgentTab({ empresaId }: AgentTabProps) {
     auto_confirmations_2h: true,
     waitlist_enabled: false,
     marketing_campaigns: false,
+    send_media_enabled: false,
+    use_service_images: false,
+    max_tool_iterations: 5,
+    auto_send_service_images: false,
   });
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -98,7 +102,7 @@ export function AgentTab({ empresaId }: AgentTabProps) {
   }, [empresaId, config, toast]);
 
   const handleToggleFeature = useCallback(
-    async (key: string, value: boolean) => {
+    async (key: string, value: boolean | number) => {
       if (!empresaId) return;
       try {
         await apiClient.patch(`/agent-config/${empresaId}/features`, {
@@ -287,6 +291,87 @@ export function AgentTab({ empresaId }: AgentTabProps) {
               id="marketing_campaigns"
               checked={features.marketing_campaigns}
               onCheckedChange={(checked) => handleToggleFeature("marketing_campaigns", checked)}
+            />
+          </div>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>Configurações de Tools</CardTitle>
+          <CardDescription>
+            Configure como o agente utiliza as ferramentas disponíveis
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-6">
+          <div className="flex items-center justify-between">
+            <div className="space-y-0.5">
+              <Label htmlFor="send_media_enabled">Habilitar envio de mídia</Label>
+              <p className="text-sm text-muted-foreground">
+                Permite que o agente envie imagens e outros tipos de mídia via WhatsApp
+              </p>
+            </div>
+            <Switch
+              id="send_media_enabled"
+              checked={features.send_media_enabled}
+              onCheckedChange={(checked) => handleToggleFeature("send_media_enabled", checked)}
+            />
+          </div>
+
+          <Separator />
+
+          <div className="flex items-center justify-between">
+            <div className="space-y-0.5">
+              <Label htmlFor="use_service_images">Usar imagens dos serviços</Label>
+              <p className="text-sm text-muted-foreground">
+                Ao enviar mídia, usar automaticamente as imagens cadastradas nos serviços
+              </p>
+            </div>
+            <Switch
+              id="use_service_images"
+              checked={features.use_service_images}
+              onCheckedChange={(checked) => handleToggleFeature("use_service_images", checked)}
+            />
+          </div>
+
+          <Separator />
+
+          <div className="flex items-center justify-between">
+            <div className="space-y-0.5 flex-1">
+              <Label htmlFor="max_tool_iterations">Máximo de iterações de tools</Label>
+              <p className="text-sm text-muted-foreground">
+                Número máximo de vezes que o agente pode chamar tools em sequência (1-10)
+              </p>
+            </div>
+            <Input
+              id="max_tool_iterations"
+              type="number"
+              min="1"
+              max="10"
+              value={features.max_tool_iterations}
+              onChange={(e) => {
+                const value = parseInt(e.target.value, 10);
+                if (!isNaN(value) && value >= 1 && value <= 10) {
+                  handleToggleFeature("max_tool_iterations", value);
+                }
+              }}
+              className="w-20"
+            />
+          </div>
+
+          <Separator />
+
+          <div className="flex items-center justify-between">
+            <div className="space-y-0.5">
+              <Label htmlFor="auto_send_service_images">Enviar imagens automaticamente</Label>
+              <p className="text-sm text-muted-foreground">
+                Ao listar serviços, enviar automaticamente as imagens dos serviços para o cliente
+              </p>
+            </div>
+            <Switch
+              id="auto_send_service_images"
+              checked={features.auto_send_service_images}
+              onCheckedChange={(checked) => handleToggleFeature("auto_send_service_images", checked)}
             />
           </div>
         </CardContent>

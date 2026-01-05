@@ -1,4 +1,4 @@
-import { IsBoolean, IsOptional } from 'class-validator';
+import { IsBoolean, IsOptional, IsNumber, Min, Max } from 'class-validator';
 
 export class UpdateAgentFeaturesDto {
   @IsBoolean()
@@ -28,5 +28,23 @@ export class UpdateAgentFeaturesDto {
   @IsBoolean()
   @IsOptional()
   marketing_campaigns?: boolean;
+
+  @IsBoolean()
+  @IsOptional()
+  send_media_enabled?: boolean;
+
+  @IsBoolean()
+  @IsOptional()
+  use_service_images?: boolean;
+
+  @IsNumber()
+  @IsOptional()
+  @Min(1)
+  @Max(10)
+  max_tool_iterations?: number;
+
+  @IsBoolean()
+  @IsOptional()
+  auto_send_service_images?: boolean;
 }
 

@@ -47,13 +47,20 @@ export class ServicesService {
   async create(empresaId: string, createServiceDto: CreateServiceDto) {
     const db = this.supabase.getServiceRoleClient();
 
+    // Migrar image_url para images se fornecido
+    let images: string[] = createServiceDto.images || [];
+    if (createServiceDto.image_url && !images.length) {
+      images = [createServiceDto.image_url];
+    }
+
     const serviceData: any = {
       empresa_id: empresaId,
       nome: createServiceDto.nome,
       descricao: createServiceDto.descricao || null,
       preco: createServiceDto.preco ? Number(createServiceDto.preco) : null,
       duracao_minutos: createServiceDto.duracao_minutos,
-      image_url: createServiceDto.image_url || null,
+      image_url: createServiceDto.image_url || null, // Deprecated
+      images: images.length > 0 ? images : null,
       ativo: createServiceDto.ativo ?? true,
       available_online: createServiceDto.available_online ?? true,
       show_price_online: createServiceDto.show_price_online ?? true,
@@ -87,7 +94,10 @@ export class ServicesService {
     if (updateServiceDto.descricao !== undefined) updateData.descricao = updateServiceDto.descricao;
     if (updateServiceDto.preco !== undefined) updateData.preco = updateServiceDto.preco ? Number(updateServiceDto.preco) : null;
     if (updateServiceDto.duracao_minutos !== undefined) updateData.duracao_minutos = updateServiceDto.duracao_minutos;
-    if (updateServiceDto.image_url !== undefined) updateData.image_url = updateServiceDto.image_url;
+    if (updateServiceDto.image_url !== undefined) updateData.image_url = updateServiceDto.image_url; // Deprecated
+    if (updateServiceDto.images !== undefined) {
+      updateData.images = updateServiceDto.images.length > 0 ? updateServiceDto.images : null;
+    }
     if (updateServiceDto.ativo !== undefined) updateData.ativo = updateServiceDto.ativo;
     if (updateServiceDto.available_online !== undefined) updateData.available_online = updateServiceDto.available_online;
     if (updateServiceDto.show_price_online !== undefined) updateData.show_price_online = updateServiceDto.show_price_online;
@@ -160,6 +170,62 @@ export class ServicesService {
       imported: data?.length || 0,
       services: data || [],
     };
+  }
+
+  /**
+   * Adicionar imagem a um serviço
+   */
+  async addImage(empresaId: string, serviceId: string, imageUrl: string) {
+    const db = this.supabase.getServiceRoleClient();
+    const existing = await this.findOne(empresaId, serviceId);
+
+    const currentImages = (existing.images as string[]) || [];
+    if (currentImages.includes(imageUrl)) {
+      throw new BadRequestException('Imagem já existe no serviço');
+    }
+
+    const updatedImages = [...currentImages, imageUrl];
+
+    const { data, error } = await db
+      .from('services')
+      .update({ images: updatedImages })
+      .eq('service_id', serviceId)
+      .eq('empresa_id', empresaId)
+      .select()
+      .single();
+
+    if (error) {
+      this.logger.error('Erro ao adicionar imagem:', error);
+      throw new BadRequestException('Erro ao adicionar imagem: ' + error.message);
+    }
+
+    return data;
+  }
+
+  /**
+   * Remover imagem de um serviço
+   */
+  async removeImage(empresaId: string, serviceId: string, imageUrl: string) {
+    const db = this.supabase.getServiceRoleClient();
+    const existing = await this.findOne(empresaId, serviceId);
+
+    const currentImages = (existing.images as string[]) || [];
+    const updatedImages = currentImages.filter((url) => url !== imageUrl);
+
+    const { data, error } = await db
+      .from('services')
+      .update({ images: updatedImages.length > 0 ? updatedImages : null })
+      .eq('service_id', serviceId)
+      .eq('empresa_id', empresaId)
+      .select()
+      .single();
+
+    if (error) {
+      this.logger.error('Erro ao remover imagem:', error);
+      throw new BadRequestException('Erro ao remover imagem: ' + error.message);
+    }
+
+    return data;
   }
 }
 
