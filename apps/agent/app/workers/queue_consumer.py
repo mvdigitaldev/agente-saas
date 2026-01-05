@@ -12,52 +12,49 @@ class QueueConsumer:
     def __init__(self):
         redis_url = os.getenv("REDIS_URL", "redis://localhost:6379")
         
-        # Corrigir URL do Upstash: remover username "default" se presente
-        # Formato correto Upstash: rediss://:PASSWORD@HOST:PORT (sem username)
-        original_url = redis_url
-        if redis_url.startswith("rediss://"):
-            # Remover qualquer username da URL (Upstash não usa username)
-            # Formato esperado: rediss://default:PASSWORD@HOST:PORT
-            # Formato correto: rediss://:PASSWORD@HOST:PORT
-            try:
-                parsed = urlparse(redis_url)
-                # Se tem username (netloc contém username:password@host), remover username
-                if parsed.username and parsed.username != "":
-                    # Reconstruir URL sem username, apenas com password
-                    if parsed.password:
-                        port = f":{parsed.port}" if parsed.port else ":6379"
-                        redis_url = f"rediss://:{parsed.password}@{parsed.hostname}{port}"
-                        logger.info(f"URL do Redis corrigida: removido username '{parsed.username}'")
-                    else:
-                        logger.warning("URL do Redis tem username mas não tem password!")
-                elif "default:" in redis_url:
-                    # Fallback: remover "default:" diretamente se urlparse não funcionou
-                    redis_url = redis_url.replace("rediss://default:", "rediss://:")
-                    logger.info("URL do Redis corrigida: removido username 'default' (fallback)")
-            except Exception as e:
-                logger.warning(f"Erro ao processar URL do Redis: {e}")
-                # Fallback: tentar remover "default:" diretamente
-                if "default:" in redis_url:
-                    redis_url = redis_url.replace("rediss://default:", "rediss://:")
-                    logger.info("URL do Redis corrigida: removido username 'default' (fallback após erro)")
-        
-        logger.info(f"Conectando ao Redis (URL original: {original_url[:30]}...)")
-        
-        # Na versão 5.0.1 do redis, from_url detecta SSL automaticamente pela URL (rediss://)
-        # Para Upstash, usar from_url sem parâmetros SSL adicionais
+        # Parsear URL do Redis manualmente para extrair componentes
+        # Upstash requer formato: rediss://default:PASSWORD@HOST:PORT
+        # Desenvolvimento local: redis://localhost:6379 (sem username/password)
         try:
-            # Usar from_url que detecta SSL automaticamente
-            self.redis_client = redis.from_url(
-                redis_url, 
+            parsed = urlparse(redis_url)
+            
+            # Extrair componentes da URL
+            hostname = parsed.hostname
+            port = parsed.port or 6379
+            password = parsed.password
+            username = parsed.username  # "default" para Upstash, None para local
+            use_ssl = redis_url.startswith("rediss://")
+            
+            # Validar componentes obrigatórios
+            if not hostname:
+                raise ValueError("URL do Redis sem hostname")
+            if use_ssl and not password:
+                raise ValueError("URL do Redis SSL sem password")
+            
+            # Log informativo
+            logger.info(f"Conectando ao Redis - Host: {hostname}, Port: {port}, SSL: {use_ssl}")
+            if username:
+                logger.info(f"Username: {username}")
+            if password:
+                logger.info(f"Password: {'*' * min(len(password), 10)}...")
+            
+            # Criar conexão usando parâmetros individuais
+            # Isso funciona melhor com Upstash que requer username "default"
+            # Usar redis.asyncio.Redis para versão assíncrona
+            self.redis_client = redis.Redis(
+                host=hostname,
+                port=port,
+                password=password,
+                username=username,  # "default" para Upstash, None para local
+                ssl=use_ssl,
+                ssl_cert_reqs=None if use_ssl else None,  # Não validar certificado SSL
                 decode_responses=True,
             )
-            logger.info("Cliente Redis criado com sucesso")
-            logger.info(f"URL usada: {redis_url[:50]}..." if len(redis_url) > 50 else f"URL usada: {redis_url}")
+            logger.info("Cliente Redis criado com sucesso usando parâmetros individuais")
+            
         except Exception as e:
             logger.error(f"Erro ao criar cliente Redis: {e}")
-            logger.error(f"URL original: {original_url[:50]}...")
-            logger.error(f"URL corrigida: {redis_url[:50]}...")
-            # Tentar criar conexão manualmente como fallback (não usar - from_url deve funcionar)
+            logger.error(f"URL usada: {redis_url[:100]}...")
             raise
         
         self.agent = AgentCore()
