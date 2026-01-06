@@ -64,7 +64,20 @@ connection.on('connect', () => {
   console.log('✅ Redis conectado');
 });
 
+connection.on('ready', () => {
+  console.log('✅ Redis pronto para uso');
+});
+
 connection.on('error', (err) => {
   console.error('❌ Erro Redis:', err);
+  console.error('   Stack:', err.stack);
+});
+
+connection.on('close', () => {
+  console.warn('⚠️ Conexão Redis fechada');
+});
+
+connection.on('reconnecting', () => {
+  console.log('🔄 Reconectando ao Redis...');
 });
 

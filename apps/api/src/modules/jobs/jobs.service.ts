@@ -1,9 +1,11 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
 import { InjectQueue } from '@nestjs/bullmq';
 import { Queue } from 'bullmq';
 
 @Injectable()
 export class JobsService {
+  private readonly logger = new Logger(JobsService.name);
+
   constructor(
     @InjectQueue('process-inbound-message')
     private processMessageQueue: Queue,
@@ -35,19 +37,30 @@ export class JobsService {
     };
 
     // Usa whatsapp_message_id como jobId para idempotência do BullMQ também
-    await this.processMessageQueue.add(
-      'process',
-      payload,
-      {
-        jobId: data.whatsapp_message_id,
-        removeOnComplete: true, // Limpar jobs completados para economizar Redis
-        attempts: 3,
-        backoff: {
-          type: 'exponential',
-          delay: 2000,
+    this.logger.log(`📤 Enfileirando job para processamento: ${data.whatsapp_message_id}`);
+    this.logger.debug(`   Payload:`, JSON.stringify(payload, null, 2));
+
+    try {
+      const job = await this.processMessageQueue.add(
+        'process',
+        payload,
+        {
+          jobId: data.whatsapp_message_id,
+          removeOnComplete: true, // Limpar jobs completados para economizar Redis
+          attempts: 3,
+          backoff: {
+            type: 'exponential',
+            delay: 2000,
+          },
         },
-      },
-    );
+      );
+
+      this.logger.log(`✅ Job enfileirado com sucesso: ${job.id} (${data.whatsapp_message_id})`);
+      return job;
+    } catch (error: any) {
+      this.logger.error(`❌ Erro ao enfileirar job: ${error.message}`, error.stack);
+      throw error;
+    }
   }
 }
 
