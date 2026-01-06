@@ -2,7 +2,6 @@ import asyncio
 import redis.asyncio as redis
 import json
 import os
-from urllib.parse import urlparse
 from app.agent.core import AgentCore
 from app.utils.logging import get_logger
 
@@ -10,183 +9,32 @@ logger = get_logger(__name__)
 
 class QueueConsumer:
     def __init__(self):
-        redis_url = os.getenv("REDIS_URL", "redis://localhost:6379")
-        original_url = redis_url
-        
-        # Limpar e normalizar URL do Redis
-        # Remover todos os espaços e garantir formato correto
-        redis_url = redis_url.strip()
-        # Remover espaços após "default:" (pode ter espaço no Render)
-        redis_url = redis_url.replace("default: ", "default:")
-        # Remover espaços em qualquer lugar da URL
-        redis_url = redis_url.replace(" ", "")
-        
-        logger.info(f"URL original: {original_url[:50]}...")
-        logger.info(f"URL normalizada: {redis_url[:50]}...")
-        
-        # Parsear URL manualmente conforme documentação do Upstash
-        # Upstash requer apenas: host, port, password, ssl=True (SEM username)
-        # Documentação n8n: "Leave the 'user' field blank"
-        try:
-            parsed = urlparse(redis_url)
-            
-            # Log detalhado do parsing
-            logger.info(f"URL parseada - scheme: {parsed.scheme}, netloc: {parsed.netloc[:50]}...")
-            logger.info(f"URL parseada - username: {parsed.username}, password extraído: {bool(parsed.password)}")
-            
-            # Extrair componentes da URL
-            hostname = parsed.hostname
-            port = parsed.port or 6379
-            password = parsed.password
-            use_ssl = redis_url.startswith("rediss://")
-            
-            # Se password não foi extraído pelo urlparse, extrair manualmente
-            # Isso pode acontecer quando há espaços ou caracteres especiais na URL
-            # Formato Upstash: rediss://default:PASSWORD@HOST:PORT
-            if not password:
-                logger.warning("Password não extraído pelo urlparse, tentando extração manual...")
-                if "default:" in redis_url and "@" in redis_url:
-                    try:
-                        # Formato: rediss://default:PASSWORD@HOST:PORT
-                        parts = redis_url.split("@")
-                        if len(parts) == 2:
-                            auth_part = parts[0].replace("rediss://", "").replace("redis://", "")
-                            logger.info(f"Auth part extraída: {auth_part[:30]}...")
-                            if "default:" in auth_part:
-                                password = auth_part.split("default:")[1]
-                                logger.info(f"Password extraído manualmente - tamanho: {len(password)}")
-                            else:
-                                # Tentar sem "default:" - pode ser apenas :PASSWORD@
-                                if ":" in auth_part:
-                                    password = auth_part.split(":")[-1]
-                                    logger.info(f"Password extraído sem 'default:' - tamanho: {len(password)}")
-                    except Exception as e:
-                        logger.error(f"Erro ao extrair password manualmente: {e}")
-                        logger.error(f"URL completa: {redis_url}")
-            
-            # Validar componentes obrigatórios
-            if not hostname:
-                raise ValueError("URL do Redis sem hostname")
-            if use_ssl and not password:
-                raise ValueError(f"URL do Redis SSL sem password. URL original: {original_url[:50]}...")
-            
-            # Log informativo detalhado
-            logger.info(f"Conectando ao Redis - Host: {hostname}, Port: {port}, SSL: {use_ssl}")
-            if password:
-                logger.info(f"Password presente - tamanho: {len(password)}, primeiros 3 chars: {password[:3]}..., últimos 3 chars: ...{password[-3:]}")
-                # Log da URL completa para debug (sem expor password completo)
-                logger.info(f"URL parseada completa (sem password): {redis_url.split('@')[0].split(':')[:-1] if '@' in redis_url else 'N/A'}@***@{hostname}:{port}")
-            else:
-                logger.error("Password não encontrado na URL após todas as tentativas!")
-                logger.error(f"URL original (primeiros 100 chars): {original_url[:100]}...")
-                logger.error(f"URL normalizada (primeiros 100 chars): {redis_url[:100]}...")
-                raise ValueError("Password não encontrado na URL do Redis")
-            
-            # Armazenar parâmetros de conexão para usar no start()
-            # Vamos testar a conexão no start() com fallback
-            self.redis_hostname = hostname
-            self.redis_port = port
-            self.redis_password = password
-            self.redis_use_ssl = use_ssl
-            
-            # Cliente será criado no start() após testar conexão
-            self.redis_client = None
-            
-        except Exception as e:
-            logger.error(f"Erro ao parsear URL do Redis: {e}")
-            logger.error(f"URL original: {original_url[:100]}...")
-            logger.error(f"URL normalizada: {redis_url[:100]}...")
-            raise
-        
+        self.redis_url = os.getenv("REDIS_URL")
+        if not self.redis_url:
+            raise RuntimeError("REDIS_URL não definida")
+
+        self.redis = redis.from_url(
+            self.redis_url,
+            decode_responses=True,
+            ssl=True,  # obrigatório para Upstash
+        )
+
         self.agent = AgentCore()
         self.queue_name = "bull:process-inbound-message:wait"
 
     async def start(self):
-        logger.info("Starting queue consumer...")
-        
-        # Criar e testar conexão com múltiplas estratégias
-        # Estratégia 1: Usar UsernamePasswordCredentialProvider com username="default"
-        # Isso pode ser mais robusto que passar username diretamente
-        logger.info("Tentativa 1: Usando UsernamePasswordCredentialProvider com username='default'")
+        logger.info("🚀 Starting queue consumer...")
+
+        # Teste simples de conexão
         try:
-            creds_provider = redis.UsernamePasswordCredentialProvider("default", self.redis_password)
-            self.redis_client = redis.Redis(
-                host=self.redis_hostname,
-                port=self.redis_port,
-                credential_provider=creds_provider,
-                ssl=self.redis_use_ssl,
-                decode_responses=True,
-            )
-            logger.info("Cliente Redis criado com CredentialProvider (username='default')")
-            
-            # Testar conexão
-            await self.redis_client.ping()
-            logger.info("Conexão Redis testada com sucesso (PING) - CredentialProvider")
-            
-        except Exception as e_creds:
-            logger.warning(f"Falha com CredentialProvider: {e_creds}")
-            
-            # Fechar cliente anterior se existir
-            if self.redis_client:
-                try:
-                    await self.redis_client.aclose()
-                except:
-                    pass
-            
-            # Estratégia 2: Tentar com username e password diretamente
-            logger.info("Tentativa 2: Usando username='default' e password diretamente")
-            try:
-                self.redis_client = redis.Redis(
-                    host=self.redis_hostname,
-                    port=self.redis_port,
-                    username="default",
-                    password=self.redis_password,
-                    ssl=self.redis_use_ssl,
-                    decode_responses=True,
-                )
-                logger.info("Cliente Redis criado com username='default' e password")
-                
-                # Testar conexão
-                await self.redis_client.ping()
-                logger.info("Conexão Redis testada com sucesso (PING) - username/password direto")
-                
-            except Exception as e_user_pass:
-                logger.warning(f"Falha com username/password direto: {e_user_pass}")
-                
-                # Fechar cliente anterior se existir
-                if self.redis_client:
-                    try:
-                        await self.redis_client.aclose()
-                    except:
-                        pass
-                
-                # Estratégia 3: Tentar apenas com password (sem username)
-                logger.info("Tentativa 3: Usando apenas password (sem username)")
-                try:
-                    self.redis_client = redis.Redis(
-                        host=self.redis_hostname,
-                        port=self.redis_port,
-                        password=self.redis_password,  # Apenas password
-                        ssl=self.redis_use_ssl,
-                        decode_responses=True,
-                    )
-                    logger.info("Cliente Redis criado apenas com password")
-                    
-                    # Testar conexão
-                    await self.redis_client.ping()
-                    logger.info("Conexão Redis testada com sucesso (PING) - apenas password")
-                    
-                except Exception as e_pass_only:
-                    logger.error(f"Todas as estratégias falharam. Último erro: {e_pass_only}")
-                    logger.error(f"Host: {self.redis_hostname}, Port: {self.redis_port}, SSL: {self.redis_use_ssl}")
-                    logger.error(f"Password length: {len(self.redis_password) if self.redis_password else 0}")
-                    logger.error("Verifique se a REDIS_URL está correta no Render")
-                    logger.error("Verifique se o password está correto e se o usuário 'default' está habilitado no Upstash")
-                    raise
-        
+            await self.redis.ping()
+            logger.info("✅ Conectado ao Redis (Upstash) com sucesso")
+        except Exception as e:
+            logger.error("❌ Falha ao conectar no Redis", exc_info=e)
+            raise
+
         while True:
             try:
-                # Consumir job do BullMQ
                 job_data = await self.consume_job()
                 if job_data:
                     await self.process_job(job_data)
@@ -195,10 +43,8 @@ class QueueConsumer:
                 await asyncio.sleep(1)
 
     async def consume_job(self):
-        # BullMQ armazena jobs em listas Redis
-        # Formato: BLPOP bull:process-inbound-message:wait
         try:
-            result = await self.redis_client.blpop(self.queue_name, timeout=1)
+            result = await self.redis.blpop(self.queue_name, timeout=1)
             if result:
                 _, job_json = result
                 return json.loads(job_json)
@@ -209,17 +55,16 @@ class QueueConsumer:
     async def process_job(self, job_data: dict):
         try:
             logger.info(f"Processing job: {job_data.get('id')}")
-            
-            # Processar mensagem com o agente
+
             await self.agent.process_message({
                 "empresa_id": job_data.get("data", {}).get("empresa_id"),
                 "conversation_id": job_data.get("data", {}).get("conversation_id"),
                 "message_id": job_data.get("data", {}).get("message_id"),
                 "whatsapp_message_id": job_data.get("data", {}).get("whatsapp_message_id"),
             })
-            
+
             logger.info(f"Job {job_data.get('id')} processed successfully")
+
         except Exception as e:
             logger.error(f"Error processing job {job_data.get('id')}: {e}")
             raise
-
