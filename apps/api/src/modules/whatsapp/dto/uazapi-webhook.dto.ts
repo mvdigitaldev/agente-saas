@@ -36,5 +36,13 @@ export class UazapiWebhookDto {
   @IsObject()
   @IsOptional()
   data?: any;
+
+  @IsString()
+  @IsOptional()
+  notifyName?: string;
+
+  @IsString()
+  @IsOptional()
+  senderName?: string;
 }
 

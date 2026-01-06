@@ -65,6 +65,29 @@ class ShortTermMemory:
             logger.error(f"Erro ao buscar memória curta: {e}", exc_info=e)
             return []
     
+    async def count_messages(self, company_id: str, conversation_id: str) -> int:
+        """Retorna contagem real de mensagens na lista"""
+        key = self._get_key(company_id, conversation_id)
+        try:
+            return await self.redis.llen(key)
+        except Exception as e:
+            logger.error(f"Erro ao contar mensagens: {e}", exc_info=True)
+            return 0
+
+    async def is_job_processed(self, job_id: str) -> bool:
+        """Verifica se job_id já foi processado (Idempotência)"""
+        if not job_id:
+            return False
+        key = f"agent:processed:{job_id}"
+        return bool(await self.redis.exists(key))
+
+    async def mark_job_processed(self, job_id: str, ttl_seconds: int = 86400):
+        """Marca job_id como processado"""
+        if not job_id:
+            return
+        key = f"agent:processed:{job_id}"
+        await self.redis.setex(key, ttl_seconds, "1")
+
     async def append(
         self,
         company_id: str,
@@ -74,13 +97,6 @@ class ShortTermMemory:
     ):
         """
         Adiciona mensagem à memória curta.
-        Mantém apenas últimas N mensagens (lista circular).
-        
-        Args:
-            company_id: ID da empresa
-            conversation_id: ID da conversa
-            role: "user" ou "agent"
-            content: Conteúdo da mensagem
         """
         key = self._get_key(company_id, conversation_id)
         
@@ -91,15 +107,11 @@ class ShortTermMemory:
             }
             message_json = json.dumps(message)
             
-            # Adicionar à lista (lado direito)
-            await self.redis.rpush(key, message_json)
-            
-            # Manter apenas últimas N mensagens (lista circular)
-            # Remover mensagens antigas além do limite
-            await self.redis.ltrim(key, -MAX_MESSAGES, -1)
-            
-            # Definir TTL (renova a cada append)
-            await self.redis.expire(key, TTL_SECONDS)
+            async with self.redis.pipeline() as pipe:
+                await pipe.rpush(key, message_json)
+                await pipe.ltrim(key, -MAX_MESSAGES, -1)
+                await pipe.expire(key, TTL_SECONDS)
+                await pipe.execute()
             
             logger.debug(f"Mensagem adicionada à memória curta: {key}")
         except Exception as e:

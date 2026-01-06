@@ -15,7 +15,7 @@ export class WhatsappService {
     private conversationsService: ConversationsService,
     private jobsService: JobsService,
     private uazapiService: UazapiService,
-  ) {}
+  ) { }
 
   /**
    * Sanitiza nome para gerar instance_name único
@@ -45,7 +45,7 @@ export class WhatsappService {
           .select('empresa_id, instance_id, uazapi_instance_id')
           .eq('uazapi_instance_id', instanceIdFromQuery)
           .single();
-        
+
         if (!error && data) {
           instance = data;
         }
@@ -58,7 +58,7 @@ export class WhatsappService {
           .select('empresa_id, instance_id, uazapi_instance_id')
           .eq('uazapi_instance_id', payload.instance_id)
           .single();
-        
+
         if (!error && data) {
           instance = data;
         }
@@ -71,17 +71,17 @@ export class WhatsappService {
           .select('empresa_id, instance_id, uazapi_instance_id')
           .eq('phone_number', payload.from)
           .single();
-        
+
         if (!error && data) {
           instance = data;
         }
       }
 
       if (!instance) {
-        this.logger.warn('WhatsApp instance not found', { 
-          instanceIdFromQuery, 
+        this.logger.warn('WhatsApp instance not found', {
+          instanceIdFromQuery,
           payloadFrom: payload.from,
-          payloadInstanceId: payload.instance_id 
+          payloadInstanceId: payload.instance_id
         });
         // Não lançar erro para não quebrar o webhook, apenas logar
         return;
@@ -120,6 +120,16 @@ export class WhatsappService {
             conversation_id,
             message_id,
             whatsapp_message_id: payload.id || payload.messageId || `inbound_${Date.now()}`,
+            // Novos campos para AgentJob
+            message: payload.body || payload.text || '', // Extrair texto da mensagem
+            channel: 'whatsapp',
+            created_at: new Date().toISOString(),
+            metadata: {
+              sender: payload.from,
+              sender_name: payload.notifyName || payload.senderName,
+              is_group: false, // Por enquanto assumindo individual
+              raw_payload: payload,
+            },
           });
         } catch (error) {
           this.logger.error('Erro ao enfileirar job:', error);
@@ -381,9 +391,9 @@ export class WhatsappService {
       const isConnected = statusResponse.status?.connected ?? statusResponse.instance.connected ?? false;
       const isLoggedIn = statusResponse.status?.loggedIn ?? statusResponse.instance.loggedIn ?? false;
       this.logger.log(`Status detectado: connected=${isConnected}, loggedIn=${isLoggedIn}, instance.status=${statusResponse.instance.status}`);
-      
+
       // Determinar status: precisa estar connected E loggedIn para ser "connected"
-      const newStatus = 
+      const newStatus =
         statusResponse.instance.status === 'connecting'
           ? 'connecting'
           : isConnected && isLoggedIn
@@ -392,10 +402,10 @@ export class WhatsappService {
 
       // Extrair número de telefone: quando conectado, o número vem em status.jid (pode ser objeto ou string)
       let phoneNumber = instance.phone_number; // Manter existente se não houver novo
-      
+
       if (newStatus === 'connected') {
         const jid = statusResponse.status?.jid;
-        
+
         if (jid) {
           if (typeof jid === 'string') {
             // Se jid é uma string no formato "554197429568:59@s.whatsapp.net"
@@ -429,7 +439,7 @@ export class WhatsappService {
       if (newStatus === 'connected' && phoneNumber && !instance.webhook_url) {
         const webhookUrl = this.uazapiService.generateWebhookUrl(instance.uazapi_instance_id);
         updateData.webhook_url = webhookUrl;
-        
+
         try {
           await this.uazapiService.setWebhook(instance.uazapi_token, webhookUrl, {
             enabled: true,
@@ -471,7 +481,7 @@ export class WhatsappService {
         this.logger.warn(
           `Instância ${instance.instance_name || instanceId} não encontrada ou token inválido no Uazapi (404/401). Atualizando status para disconnected.`,
         );
-        
+
         const { error: updateError } = await db
           .from('whatsapp_instances')
           .update({
