@@ -26,8 +26,13 @@ class QueueConsumer:
         
         # Parsear URL manualmente conforme documentação do Upstash
         # Upstash requer apenas: host, port, password, ssl=True (SEM username)
+        # Documentação n8n: "Leave the 'user' field blank"
         try:
             parsed = urlparse(redis_url)
+            
+            # Log detalhado do parsing
+            logger.info(f"URL parseada - scheme: {parsed.scheme}, netloc: {parsed.netloc[:50]}...")
+            logger.info(f"URL parseada - username: {parsed.username}, password extraído: {bool(parsed.password)}")
             
             # Extrair componentes da URL
             hostname = parsed.hostname
@@ -37,17 +42,27 @@ class QueueConsumer:
             
             # Se password não foi extraído pelo urlparse, extrair manualmente
             # Isso pode acontecer quando há espaços ou caracteres especiais na URL
-            if not password and "default:" in redis_url and "@" in redis_url:
-                try:
-                    # Formato: rediss://default:PASSWORD@HOST:PORT
-                    parts = redis_url.split("@")
-                    if len(parts) == 2:
-                        auth_part = parts[0].replace("rediss://", "").replace("redis://", "")
-                        if "default:" in auth_part:
-                            password = auth_part.split("default:")[1]
-                            logger.info("Password extraído manualmente da URL")
-                except Exception as e:
-                    logger.warning(f"Erro ao extrair password manualmente: {e}")
+            # Formato Upstash: rediss://default:PASSWORD@HOST:PORT
+            if not password:
+                logger.warning("Password não extraído pelo urlparse, tentando extração manual...")
+                if "default:" in redis_url and "@" in redis_url:
+                    try:
+                        # Formato: rediss://default:PASSWORD@HOST:PORT
+                        parts = redis_url.split("@")
+                        if len(parts) == 2:
+                            auth_part = parts[0].replace("rediss://", "").replace("redis://", "")
+                            logger.info(f"Auth part extraída: {auth_part[:30]}...")
+                            if "default:" in auth_part:
+                                password = auth_part.split("default:")[1]
+                                logger.info(f"Password extraído manualmente - tamanho: {len(password)}")
+                            else:
+                                # Tentar sem "default:" - pode ser apenas :PASSWORD@
+                                if ":" in auth_part:
+                                    password = auth_part.split(":")[-1]
+                                    logger.info(f"Password extraído sem 'default:' - tamanho: {len(password)}")
+                    except Exception as e:
+                        logger.error(f"Erro ao extrair password manualmente: {e}")
+                        logger.error(f"URL completa: {redis_url}")
             
             # Validar componentes obrigatórios
             if not hostname:
@@ -55,24 +70,48 @@ class QueueConsumer:
             if use_ssl and not password:
                 raise ValueError(f"URL do Redis SSL sem password. URL original: {original_url[:50]}...")
             
-            # Log informativo
+            # Log informativo detalhado
             logger.info(f"Conectando ao Redis - Host: {hostname}, Port: {port}, SSL: {use_ssl}")
             if password:
-                logger.info(f"Password: {'*' * min(len(password), 10)}... (tamanho: {len(password)})")
+                logger.info(f"Password presente - tamanho: {len(password)}, primeiros 3 chars: {password[:3]}..., últimos 3 chars: ...{password[-3:]}")
+                # Log da URL completa para debug (sem expor password completo)
+                logger.info(f"URL parseada completa (sem password): {redis_url.split('@')[0].split(':')[:-1] if '@' in redis_url else 'N/A'}@***@{hostname}:{port}")
             else:
-                logger.warning("Password não encontrado na URL")
+                logger.error("Password não encontrado na URL após todas as tentativas!")
+                logger.error(f"URL original (primeiros 100 chars): {original_url[:100]}...")
+                logger.error(f"URL normalizada (primeiros 100 chars): {redis_url[:100]}...")
+                raise ValueError("Password não encontrado na URL do Redis")
             
             # Criar conexão EXATAMENTE como na documentação do Upstash
             # Usar apenas: host, port, password, ssl=True (SEM username)
             # Documentação: https://upstash.com/docs/redis/howto/connectclient
-            self.redis_client = redis.Redis(
-                host=hostname,
-                port=port,
-                password=password,  # Apenas password - SEM username
-                ssl=use_ssl,  # True para rediss://
-                decode_responses=True,
-            )
-            logger.info("Cliente Redis criado com sucesso seguindo documentação do Upstash")
+            # n8n: "Leave the 'user' field blank"
+            logger.info("Criando cliente Redis com parâmetros: host, port, password, ssl (SEM username)")
+            
+            # Tentar primeiro sem username (conforme documentação)
+            try:
+                self.redis_client = redis.Redis(
+                    host=hostname,
+                    port=port,
+                    password=password,  # Apenas password - SEM username (conforme doc Upstash)
+                    ssl=use_ssl,  # True para rediss://
+                    decode_responses=True,
+                )
+                logger.info("Cliente Redis criado SEM username (conforme documentação)")
+            except Exception as e_no_user:
+                logger.warning(f"Falha ao conectar SEM username: {e_no_user}")
+                logger.info("Tentando com username='default' explicitamente...")
+                # Fallback: tentar com username "default" explicitamente
+                # Mesmo que a doc não mencione, pode ser necessário
+                self.redis_client = redis.Redis(
+                    host=hostname,
+                    port=port,
+                    username="default",  # Tentar com username explicitamente
+                    password=password,
+                    ssl=use_ssl,
+                    decode_responses=True,
+                )
+                logger.info("Cliente Redis criado COM username='default' (fallback)")
             
         except Exception as e:
             logger.error(f"Erro ao criar cliente Redis: {e}")
