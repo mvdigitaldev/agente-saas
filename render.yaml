@@ -31,21 +31,22 @@ services:
       - key: UAZAPI_ADMIN_TOKEN
         sync: false
 
-  # Python Agent Worker
-  - type: worker
+  # Python Agent (HTTP Service - FastAPI)
+  - type: web
     name: agente-saas-agent
     env: python
     rootDir: apps/agent
     buildCommand: pip install --upgrade pip setuptools wheel && pip install -r requirements.txt
-    startCommand: python -m app.main
+    startCommand: uvicorn app.main:app --host 0.0.0.0 --port $PORT
+    healthCheckPath: /api/health
     envVars:
       - key: PYTHON_VERSION
         value: "3.11.11"
+      - key: PORT
+        value: "8000"
       - key: SUPABASE_URL
         sync: false
       - key: SUPABASE_SERVICE_ROLE_KEY
-        sync: false
-      - key: REDIS_URL
         sync: false
       - key: NEST_API_URL
         sync: false
@@ -53,4 +54,21 @@ services:
         sync: false
       - key: OPENAI_API_KEY
         sync: false
+      # NOTA: REDIS_URL removido - Python não usa Redis mais
+
+  # Node.js BullMQ Worker (Background Worker)
+  - type: worker
+    name: agente-saas-worker
+    env: node
+    rootDir: apps/agent-worker
+    buildCommand: npm install && npm run build
+    startCommand: npm run start
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: REDIS_URL
+        sync: false
+      - key: AGENT_PYTHON_URL
+        value: https://agente-saas-agent.onrender.com
+        # URL do serviço Python (será gerada pelo Render)
 

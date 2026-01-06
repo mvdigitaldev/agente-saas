@@ -10,6 +10,7 @@
     "dev": "turbo run dev",
     "dev:api": "cd apps/api && npm run dev",
     "dev:web": "cd apps/web && npm run dev",
+    "dev:worker": "cd apps/agent-worker && npm run dev",
     "build": "turbo run build",
     "lint": "turbo run lint",
     "clean": "turbo run clean"
