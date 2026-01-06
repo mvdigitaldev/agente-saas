@@ -18,93 +18,67 @@ class QueueConsumer:
         redis_url = redis_url.strip()
         # Remover espaços após "default:" (pode ter espaço no Render)
         redis_url = redis_url.replace("default: ", "default:")
-        redis_url = redis_url.replace("default:", "default:")
         # Remover espaços em qualquer lugar da URL
         redis_url = redis_url.replace(" ", "")
         
         logger.info(f"URL original: {original_url[:50]}...")
         logger.info(f"URL normalizada: {redis_url[:50]}...")
         
-        # Tentar usar from_url primeiro (mais robusto)
-        # Se falhar, tentar com parâmetros individuais
+        # Parsear URL manualmente conforme documentação do Upstash
+        # Upstash requer apenas: host, port, password, ssl=True (SEM username)
         try:
-            # Usar from_url que lida melhor com URLs malformadas
-            self.redis_client = redis.from_url(
-                redis_url,
+            parsed = urlparse(redis_url)
+            
+            # Extrair componentes da URL
+            hostname = parsed.hostname
+            port = parsed.port or 6379
+            password = parsed.password
+            use_ssl = redis_url.startswith("rediss://")
+            
+            # Se password não foi extraído pelo urlparse, extrair manualmente
+            # Isso pode acontecer quando há espaços ou caracteres especiais na URL
+            if not password and "default:" in redis_url and "@" in redis_url:
+                try:
+                    # Formato: rediss://default:PASSWORD@HOST:PORT
+                    parts = redis_url.split("@")
+                    if len(parts) == 2:
+                        auth_part = parts[0].replace("rediss://", "").replace("redis://", "")
+                        if "default:" in auth_part:
+                            password = auth_part.split("default:")[1]
+                            logger.info("Password extraído manualmente da URL")
+                except Exception as e:
+                    logger.warning(f"Erro ao extrair password manualmente: {e}")
+            
+            # Validar componentes obrigatórios
+            if not hostname:
+                raise ValueError("URL do Redis sem hostname")
+            if use_ssl and not password:
+                raise ValueError(f"URL do Redis SSL sem password. URL original: {original_url[:50]}...")
+            
+            # Log informativo
+            logger.info(f"Conectando ao Redis - Host: {hostname}, Port: {port}, SSL: {use_ssl}")
+            if password:
+                logger.info(f"Password: {'*' * min(len(password), 10)}... (tamanho: {len(password)})")
+            else:
+                logger.warning("Password não encontrado na URL")
+            
+            # Criar conexão EXATAMENTE como na documentação do Upstash
+            # Usar apenas: host, port, password, ssl=True (SEM username)
+            # Documentação: https://upstash.com/docs/redis/howto/connectclient
+            self.redis_client = redis.Redis(
+                host=hostname,
+                port=port,
+                password=password,  # Apenas password - SEM username
+                ssl=use_ssl,  # True para rediss://
                 decode_responses=True,
             )
-            logger.info("Cliente Redis criado com sucesso usando from_url")
-        except Exception as e1:
-            logger.warning(f"Erro ao usar from_url: {e1}, tentando com parâmetros individuais...")
+            logger.info("Cliente Redis criado com sucesso seguindo documentação do Upstash")
             
-            # Fallback: parsear manualmente e criar com parâmetros individuais
-            try:
-                parsed = urlparse(redis_url)
-                
-                # Extrair componentes da URL
-                hostname = parsed.hostname
-                port = parsed.port or 6379
-                password = parsed.password
-                username = parsed.username  # Pode ser "default" ou None
-                use_ssl = redis_url.startswith("rediss://")
-                
-                # Se password está None mas a URL tem "default:", extrair manualmente
-                if not password and "default:" in redis_url and "@" in redis_url:
-                    try:
-                        # Formato: rediss://default:PASSWORD@HOST:PORT
-                        parts = redis_url.split("@")
-                        if len(parts) == 2:
-                            auth_part = parts[0].replace("rediss://", "").replace("redis://", "")
-                            if "default:" in auth_part:
-                                password = auth_part.split("default:")[1]
-                                logger.info("Password extraído manualmente da URL")
-                    except Exception as e:
-                        logger.warning(f"Erro ao extrair password manualmente: {e}")
-                
-                # Validar componentes obrigatórios
-                if not hostname:
-                    raise ValueError("URL do Redis sem hostname")
-                if use_ssl and not password:
-                    raise ValueError(f"URL do Redis SSL sem password")
-                
-                # Log informativo
-                logger.info(f"Conectando ao Redis - Host: {hostname}, Port: {port}, SSL: {use_ssl}")
-                if username:
-                    logger.info(f"Username: {username}")
-                if password:
-                    logger.info(f"Password: {'*' * min(len(password), 10)}... (tamanho: {len(password)})")
-                
-                # Criar conexão usando parâmetros individuais
-                # Tentar SEM username primeiro (Upstash pode não aceitar)
-                try:
-                    self.redis_client = redis.Redis(
-                        host=hostname,
-                        port=port,
-                        password=password,
-                        ssl=use_ssl,
-                        ssl_cert_reqs=None if use_ssl else None,
-                        decode_responses=True,
-                    )
-                    logger.info("Cliente Redis criado com parâmetros individuais (sem username)")
-                except Exception as e2:
-                    # Se falhar sem username, tentar COM username "default"
-                    logger.warning(f"Erro sem username: {e2}, tentando com username 'default'...")
-                    self.redis_client = redis.Redis(
-                        host=hostname,
-                        port=port,
-                        password=password,
-                        username="default" if username else None,
-                        ssl=use_ssl,
-                        ssl_cert_reqs=None if use_ssl else None,
-                        decode_responses=True,
-                    )
-                    logger.info("Cliente Redis criado com parâmetros individuais (com username 'default')")
-            
-            except Exception as e:
-                logger.error(f"Erro ao criar cliente Redis: {e}")
-                logger.error(f"URL original: {original_url[:100]}...")
-                logger.error(f"URL normalizada: {redis_url[:100]}...")
-                raise
+        except Exception as e:
+            logger.error(f"Erro ao criar cliente Redis: {e}")
+            logger.error(f"URL original: {original_url[:100]}...")
+            logger.error(f"URL normalizada: {redis_url[:100]}...")
+            raise
         
         self.agent = AgentCore()
         self.queue_name = "bull:process-inbound-message:wait"
