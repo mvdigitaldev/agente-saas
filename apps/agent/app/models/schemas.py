@@ -1,5 +1,30 @@
-from pydantic import BaseModel
-from typing import Optional, List
+from pydantic import BaseModel, field_validator
+from typing import Optional, List, Dict
+from datetime import datetime
+
+class AgentJob(BaseModel):
+    """Schema fixo para jobs consumidos do BullMQ"""
+    job_id: str
+    company_id: str
+    conversation_id: str
+    message: str
+    channel: str
+    metadata: Optional[Dict] = None
+    created_at: datetime
+    
+    @field_validator('created_at', mode='before')
+    @classmethod
+    def parse_created_at(cls, v):
+        """Aceita datetime, string ISO ou None (usa now() se None)"""
+        if v is None:
+            return datetime.now()
+        if isinstance(v, str):
+            # Tentar parsear ISO format
+            try:
+                return datetime.fromisoformat(v.replace('Z', '+00:00'))
+            except:
+                return datetime.now()
+        return v
 
 class MessageData(BaseModel):
     empresa_id: str
