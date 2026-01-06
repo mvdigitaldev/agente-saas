@@ -82,39 +82,18 @@ class QueueConsumer:
                 logger.error(f"URL normalizada (primeiros 100 chars): {redis_url[:100]}...")
                 raise ValueError("Password não encontrado na URL do Redis")
             
-            # Criar conexão EXATAMENTE como na documentação do Upstash
-            # Usar apenas: host, port, password, ssl=True (SEM username)
-            # Documentação: https://upstash.com/docs/redis/howto/connectclient
-            # n8n: "Leave the 'user' field blank"
-            logger.info("Criando cliente Redis com parâmetros: host, port, password, ssl (SEM username)")
+            # Armazenar parâmetros de conexão para usar no start()
+            # Vamos testar a conexão no start() com fallback
+            self.redis_hostname = hostname
+            self.redis_port = port
+            self.redis_password = password
+            self.redis_use_ssl = use_ssl
             
-            # Tentar primeiro sem username (conforme documentação)
-            try:
-                self.redis_client = redis.Redis(
-                    host=hostname,
-                    port=port,
-                    password=password,  # Apenas password - SEM username (conforme doc Upstash)
-                    ssl=use_ssl,  # True para rediss://
-                    decode_responses=True,
-                )
-                logger.info("Cliente Redis criado SEM username (conforme documentação)")
-            except Exception as e_no_user:
-                logger.warning(f"Falha ao conectar SEM username: {e_no_user}")
-                logger.info("Tentando com username='default' explicitamente...")
-                # Fallback: tentar com username "default" explicitamente
-                # Mesmo que a doc não mencione, pode ser necessário
-                self.redis_client = redis.Redis(
-                    host=hostname,
-                    port=port,
-                    username="default",  # Tentar com username explicitamente
-                    password=password,
-                    ssl=use_ssl,
-                    decode_responses=True,
-                )
-                logger.info("Cliente Redis criado COM username='default' (fallback)")
+            # Cliente será criado no start() após testar conexão
+            self.redis_client = None
             
         except Exception as e:
-            logger.error(f"Erro ao criar cliente Redis: {e}")
+            logger.error(f"Erro ao parsear URL do Redis: {e}")
             logger.error(f"URL original: {original_url[:100]}...")
             logger.error(f"URL normalizada: {redis_url[:100]}...")
             raise
@@ -125,14 +104,55 @@ class QueueConsumer:
     async def start(self):
         logger.info("Starting queue consumer...")
         
-        # Testar conexão antes de começar
+        # Criar e testar conexão com fallback
+        # Tentar primeiro sem username (conforme documentação do Upstash)
+        logger.info("Criando cliente Redis com parâmetros: host, port, password, ssl (SEM username)")
         try:
+            self.redis_client = redis.Redis(
+                host=self.redis_hostname,
+                port=self.redis_port,
+                password=self.redis_password,  # Apenas password - SEM username (conforme doc Upstash)
+                ssl=self.redis_use_ssl,  # True para rediss://
+                decode_responses=True,
+            )
+            logger.info("Cliente Redis criado SEM username (conforme documentação)")
+            
+            # Testar conexão
             await self.redis_client.ping()
-            logger.info("Conexão Redis testada com sucesso (PING)")
-        except Exception as e:
-            logger.error(f"Erro ao testar conexão Redis: {e}")
-            logger.error("Verifique se a REDIS_URL está correta no Render")
-            raise
+            logger.info("Conexão Redis testada com sucesso (PING) - SEM username")
+            
+        except Exception as e_no_user:
+            logger.warning(f"Falha ao conectar SEM username: {e_no_user}")
+            logger.info("Tentando com username='default' explicitamente...")
+            
+            # Fechar cliente anterior se existir
+            if self.redis_client:
+                try:
+                    await self.redis_client.aclose()
+                except:
+                    pass
+            
+            # Fallback: tentar com username "default" explicitamente
+            # Mesmo que a doc não mencione, pode ser necessário para Upstash
+            try:
+                self.redis_client = redis.Redis(
+                    host=self.redis_hostname,
+                    port=self.redis_port,
+                    username="default",  # Tentar com username explicitamente
+                    password=self.redis_password,
+                    ssl=self.redis_use_ssl,
+                    decode_responses=True,
+                )
+                logger.info("Cliente Redis criado COM username='default' (fallback)")
+                
+                # Testar conexão
+                await self.redis_client.ping()
+                logger.info("Conexão Redis testada com sucesso (PING) - COM username='default'")
+                
+            except Exception as e_with_user:
+                logger.error(f"Erro ao testar conexão Redis COM username: {e_with_user}")
+                logger.error("Verifique se a REDIS_URL está correta no Render")
+                raise
         
         while True:
             try:
