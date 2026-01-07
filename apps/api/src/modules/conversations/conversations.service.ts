@@ -1,8 +1,10 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
 import { SupabaseService } from '../../database/supabase.service';
 
 @Injectable()
 export class ConversationsService {
+  private readonly logger = new Logger(ConversationsService.name);
+
   constructor(private supabase: SupabaseService) {}
 
   async upsertConversationAndMessage(data: {
@@ -16,8 +18,13 @@ export class ConversationsService {
   }) {
     const db = this.supabase.getServiceRoleClient();
 
+    this.logger.log('Iniciando upsertConversationAndMessage', {
+      empresa_id: data.empresa_id,
+      whatsapp_number: data.whatsapp_number,
+    });
+
     // Upsert client
-    const { data: client } = await db
+    const { data: client, error: clientError } = await db
       .from('clients')
       .upsert(
         {
@@ -31,8 +38,15 @@ export class ConversationsService {
       .select('client_id')
       .single();
 
+    if (clientError || !client) {
+      this.logger.error('Erro ao upsert client:', clientError);
+      throw new Error(`Erro ao criar/atualizar cliente: ${clientError?.message || 'cliente não retornado'}`);
+    }
+
+    this.logger.log('Client upsertado:', { client_id: client.client_id });
+
     // Upsert conversation
-    const { data: conversation } = await db
+    const { data: conversation, error: conversationError } = await db
       .from('conversations')
       .upsert(
         {
@@ -49,19 +63,39 @@ export class ConversationsService {
       .select('conversation_id')
       .single();
 
-    // Insert message (com unique constraint para idempotência)
-    const { data: message } = await db
+    if (conversationError || !conversation) {
+      this.logger.error('Erro ao upsert conversation:', conversationError);
+      throw new Error(`Erro ao criar/atualizar conversa: ${conversationError?.message || 'conversa não retornada'}`);
+    }
+
+    this.logger.log('Conversation upsertada:', { conversation_id: conversation.conversation_id });
+
+    // Insert message (usar upsert para evitar duplicatas)
+    const { data: message, error: messageError } = await db
       .from('messages')
-      .insert({
-        empresa_id: data.empresa_id,
-        conversation_id: conversation.conversation_id,
-        whatsapp_message_id: data.whatsapp_message_id,
-        direction: data.direction,
-        role: data.role,
-        content: data.content,
-      })
+      .upsert(
+        {
+          empresa_id: data.empresa_id,
+          conversation_id: conversation.conversation_id,
+          whatsapp_message_id: data.whatsapp_message_id,
+          direction: data.direction,
+          role: data.role,
+          content: data.content,
+        },
+        {
+          onConflict: 'whatsapp_message_id',
+          ignoreDuplicates: false,
+        },
+      )
       .select('message_id')
       .single();
+
+    if (messageError || !message) {
+      this.logger.error('Erro ao inserir message:', messageError);
+      throw new Error(`Erro ao criar mensagem: ${messageError?.message || 'mensagem não retornada'}`);
+    }
+
+    this.logger.log('Message criada:', { message_id: message.message_id });
 
     return {
       conversation_id: conversation.conversation_id,

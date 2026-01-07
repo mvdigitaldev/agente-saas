@@ -31,7 +31,8 @@ export class WhatsappService {
   }
 
   /**
-   * Extrai dados relevantes do payload da Uazapi (diferentes formatos)
+   * Extrai dados relevantes do payload da Uazapi (formato real)
+   * Formato Uazapi: { EventType, message: { chatid, content, text, messageid, sender, senderName, fromMe }, chat, owner }
    */
   private extractMessageData(payload: any): {
     messageId: string;
@@ -40,8 +41,34 @@ export class WhatsappService {
     senderName: string;
     type: string;
     instanceId?: string;
+    isFromMe: boolean;
+    owner: string;
   } | null {
-    // Formato 1: Uazapi padrão com data.key e data.message
+    // Ignorar mensagens enviadas pela API (evitar loop)
+    if (payload.message?.wasSentByApi === true || payload.message?.fromMe === true) {
+      this.logger.log('Ignorando mensagem enviada pela API ou fromMe=true');
+      return null;
+    }
+
+    // Formato Uazapi real: { EventType: "messages", message: { ... }, chat: { ... } }
+    if (payload.EventType === 'messages' && payload.message) {
+      const msg = payload.message;
+      const phone = msg.sender?.replace('@s.whatsapp.net', '').replace('@c.us', '') || 
+                    msg.chatid?.replace('@s.whatsapp.net', '').replace('@c.us', '') || '';
+      
+      return {
+        messageId: msg.messageid || msg.id || `msg_${Date.now()}`,
+        from: phone,
+        body: msg.content || msg.text || '',
+        senderName: msg.senderName || payload.chat?.name || payload.chat?.wa_name || '',
+        type: payload.EventType,
+        instanceId: undefined, // Uazapi não envia instance_id no payload, usamos query param
+        isFromMe: msg.fromMe === true,
+        owner: payload.owner || '',
+      };
+    }
+
+    // Formato alternativo: payload direto com data.key (baileys style)
     if (payload.data?.key?.remoteJid) {
       const remoteJid = payload.data.key.remoteJid;
       const phone = remoteJid.replace('@s.whatsapp.net', '').replace('@c.us', '');
@@ -52,15 +79,16 @@ export class WhatsappService {
         body: payload.data.message?.conversation || 
               payload.data.message?.extendedTextMessage?.text ||
               payload.data.message?.imageMessage?.caption ||
-              payload.data.message?.videoMessage?.caption ||
               '',
         senderName: payload.data.pushName || '',
         type: payload.event || 'message',
         instanceId: payload.instance,
+        isFromMe: payload.data.key.fromMe === true,
+        owner: '',
       };
     }
 
-    // Formato 2: Payload direto com from/body
+    // Formato legado: payload com from/body direto
     if (payload.from) {
       return {
         messageId: payload.id || payload.messageId || `msg_${Date.now()}`,
@@ -69,6 +97,8 @@ export class WhatsappService {
         senderName: payload.notifyName || payload.senderName || payload.pushName || '',
         type: payload.type || 'message',
         instanceId: payload.instance_id,
+        isFromMe: payload.fromMe === true,
+        owner: '',
       };
     }
 
@@ -85,60 +115,54 @@ export class WhatsappService {
       
       if (!messageData) {
         this.logger.warn('Payload não reconhecido ou sem dados de mensagem', { payload });
-        return; // Não é uma mensagem, pode ser evento de conexão, ack, etc.
+        return; // Não é uma mensagem válida para processar
       }
 
-      this.logger.log('Dados extraídos do webhook:', messageData);
+      // Ignorar mensagens vazias
+      if (!messageData.body || messageData.body.trim() === '') {
+        this.logger.log('Ignorando mensagem vazia');
+        return;
+      }
 
-      // 1. Identificar empresa por instance_id (prioridade: query param > payload > messageData)
+      this.logger.log('📨 Dados extraídos do webhook:', messageData);
+
+      // 1. Identificar empresa por instance_id (prioridade: query param > owner do payload)
       let instance = null;
 
       // Tentar por instance_id do query param
       if (instanceIdFromQuery) {
         const { data, error } = await db
           .from('whatsapp_instances')
-          .select('empresa_id, instance_id, uazapi_instance_id')
+          .select('empresa_id, instance_id, uazapi_instance_id, uazapi_token')
           .eq('uazapi_instance_id', instanceIdFromQuery)
           .single();
 
         if (!error && data) {
           instance = data;
+          this.logger.log('Instância encontrada por query param:', { instance_id: data.instance_id });
         }
       }
 
-      // Tentar por instance_id extraído do payload
-      if (!instance && messageData.instanceId) {
+      // Tentar por owner (número do WhatsApp conectado)
+      if (!instance && messageData.owner) {
         const { data, error } = await db
           .from('whatsapp_instances')
-          .select('empresa_id, instance_id, uazapi_instance_id')
-          .eq('uazapi_instance_id', messageData.instanceId)
+          .select('empresa_id, instance_id, uazapi_instance_id, uazapi_token')
+          .eq('phone_number', messageData.owner)
           .single();
 
         if (!error && data) {
           instance = data;
-        }
-      }
-
-      // Fallback: tentar por phone_number (from)
-      if (!instance && messageData.from) {
-        const { data, error } = await db
-          .from('whatsapp_instances')
-          .select('empresa_id, instance_id, uazapi_instance_id')
-          .eq('phone_number', messageData.from)
-          .single();
-
-        if (!error && data) {
-          instance = data;
+          this.logger.log('Instância encontrada por owner:', { instance_id: data.instance_id });
         }
       }
 
       if (!instance) {
         this.logger.warn('WhatsApp instance not found', {
           instanceIdFromQuery,
-          messageFrom: messageData.from,
-          messageInstanceId: messageData.instanceId
+          owner: messageData.owner,
+          from: messageData.from,
         });
-        // Não lançar erro para não quebrar o webhook, apenas logar
         return;
       }
 
@@ -156,45 +180,41 @@ export class WhatsappService {
       }
 
       // 3. Upsert conversation + contact
-      try {
-        const { conversation_id, message_id } =
-          await this.conversationsService.upsertConversationAndMessage({
-            empresa_id: instance.empresa_id,
-            whatsapp_instance_id: instance.instance_id,
-            whatsapp_number: messageData.from,
-            whatsapp_message_id: messageData.messageId,
-            content: messageData.body,
-            direction: 'inbound',
-            role: 'user',
-          });
+      const { conversation_id, message_id } =
+        await this.conversationsService.upsertConversationAndMessage({
+          empresa_id: instance.empresa_id,
+          whatsapp_instance_id: instance.instance_id,
+          whatsapp_number: messageData.from,
+          whatsapp_message_id: messageData.messageId,
+          content: messageData.body,
+          direction: 'inbound',
+          role: 'user',
+        });
 
-        // 4. Enqueue job com dedupe_key
-        try {
-          await this.jobsService.enqueueProcessMessage({
-            empresa_id: instance.empresa_id,
-            conversation_id,
-            message_id,
-            whatsapp_message_id: messageData.messageId,
-            // Novos campos para AgentJob
-            message: messageData.body,
-            channel: 'whatsapp',
-            created_at: new Date().toISOString(),
-            metadata: {
-              sender: messageData.from,
-              sender_name: messageData.senderName,
-              is_group: false, // Por enquanto assumindo individual
-              raw_payload: payload,
-            },
-          });
-        } catch (error) {
-          this.logger.error('Erro ao enfileirar job:', error);
-        }
-      } catch (error) {
-        this.logger.error('Erro ao processar conversa:', error);
-      }
+      this.logger.log('💬 Conversa criada/atualizada:', { conversation_id, message_id });
+
+      // 4. Enqueue job para processar com IA
+      await this.jobsService.enqueueProcessMessage({
+        empresa_id: instance.empresa_id,
+        conversation_id,
+        message_id,
+        whatsapp_message_id: messageData.messageId,
+        message: messageData.body,
+        channel: 'whatsapp',
+        created_at: new Date().toISOString(),
+        metadata: {
+          sender: messageData.from,
+          sender_name: messageData.senderName,
+          is_group: false,
+          raw_payload: payload,
+        },
+      });
+
+      this.logger.log('🤖 Job enfileirado para processamento IA');
+
     } catch (error) {
-      this.logger.error('Erro geral no handleInboundMessage:', error);
-      // Não lançar erro para não quebrar o webhook
+      this.logger.error('Erro ao processar mensagem:', error);
+      throw error;
     }
   }
 

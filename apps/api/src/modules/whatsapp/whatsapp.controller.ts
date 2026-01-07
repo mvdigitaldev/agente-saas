@@ -22,11 +22,12 @@ export class WhatsappController {
     // Pegar body raw sem validação do class-validator
     const payload = req.body;
 
-    // Log TUDO que chegar - incluindo timestamp
+    // Log detalhado do webhook recebido
     console.log('═══════════════════════════════════════════════');
     console.log(`📥 [${new Date().toISOString()}] WEBHOOK RECEBIDO`);
     console.log('Instance ID (query):', instanceId);
-    console.log('Payload completo:', JSON.stringify(payload, null, 2));
+    console.log('Event Type:', payload.EventType);
+    console.log('Message:', payload.message?.text || payload.message?.content || '(sem texto)');
     console.log('═══════════════════════════════════════════════');
 
     try {
