@@ -55,6 +55,7 @@ export class AgentService {
       // O BullMQ já garante que o mesmo job não será processado duas vezes com o mesmo jobId
 
       // Construir contexto
+      const db = this.supabase.getServiceRoleClient();
       const { data: conversation } = await db
         .from('conversations')
         .select('client_id')
