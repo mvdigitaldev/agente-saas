@@ -1,8 +1,10 @@
+import { Injectable } from '@nestjs/common';
 import { SchedulingService } from '../../../scheduling/scheduling.service';
 import { ToolContext } from '../tool.interface';
 import { AvailableSlotsDto } from '../../../scheduling/dto/available-slots.dto';
 import { CreateAppointmentDto } from '../../../scheduling/dto/create-appointment.dto';
 
+@Injectable()
 export class SchedulingTools {
   constructor(private readonly schedulingService: SchedulingService) {}
 

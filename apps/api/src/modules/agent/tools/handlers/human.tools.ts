@@ -1,6 +1,8 @@
+import { Injectable } from '@nestjs/common';
 import { ConversationsService } from '../../../conversations/conversations.service';
 import { ToolContext } from '../tool.interface';
 
+@Injectable()
 export class HumanTools {
   constructor(private readonly conversationsService: ConversationsService) {}
 

@@ -1,6 +1,8 @@
+import { Injectable } from '@nestjs/common';
 import { WhatsappService } from '../../../whatsapp/whatsapp.service';
 import { ToolContext } from '../tool.interface';
 
+@Injectable()
 export class MediaTools {
   constructor(private readonly whatsappService: WhatsappService) {}
 

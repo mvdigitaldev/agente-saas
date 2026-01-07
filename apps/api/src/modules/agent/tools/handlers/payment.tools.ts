@@ -1,7 +1,9 @@
+import { Injectable } from '@nestjs/common';
 import { SchedulingService } from '../../../scheduling/scheduling.service';
 import { ToolContext } from '../tool.interface';
 import { PaymentLinkDto } from '../../../scheduling/dto/payment-link.dto';
 
+@Injectable()
 export class PaymentTools {
   constructor(private readonly schedulingService: SchedulingService) {}
 

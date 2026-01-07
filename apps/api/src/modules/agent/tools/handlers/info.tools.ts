@@ -1,6 +1,8 @@
+import { Injectable } from '@nestjs/common';
 import { SchedulingService } from '../../../scheduling/scheduling.service';
 import { ToolContext } from '../tool.interface';
 
+@Injectable()
 export class InfoTools {
   constructor(private readonly schedulingService: SchedulingService) {}
 

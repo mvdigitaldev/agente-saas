@@ -740,17 +740,8 @@ export class WhatsappService {
       data.buttons,
     );
 
-    // Salvar mensagem outbound
-    if (data.conversation_id) {
-      await db.from('messages').insert({
-        empresa_id: data.empresa_id,
-        conversation_id: data.conversation_id,
-        whatsapp_message_id: result.id || result.messageId || `outbound_${Date.now()}`,
-        direction: 'outbound',
-        role: 'assistant',
-        content: data.message,
-      });
-    }
+    // NOTA: Não salvar mensagem aqui - já foi salva pelo AgentService antes de chamar sendMessage
+    // Evita duplicação de mensagens no banco
 
     return result;
   }
@@ -825,17 +816,8 @@ export class WhatsappService {
       data.caption,
     );
 
-    // Salvar mensagem outbound
-    if (data.conversation_id) {
-      await db.from('messages').insert({
-        empresa_id: data.empresa_id,
-        conversation_id: data.conversation_id,
-        whatsapp_message_id: result.id || result.messageId || `outbound_media_${Date.now()}`,
-        direction: 'outbound',
-        role: 'assistant',
-        content: data.caption || `[${data.media_type || 'image'}]`,
-      });
-    }
+    // NOTA: Não salvar mensagem aqui - deve ser salva pelo chamador se necessário
+    // Evita duplicação de mensagens no banco
 
     return result;
   }
