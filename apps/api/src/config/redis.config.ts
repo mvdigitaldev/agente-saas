@@ -6,20 +6,32 @@ export function getRedisConnection(): RedisOptions {
    */
   if (process.env.REDIS_URL) {
     const redisUrl = process.env.REDIS_URL.trim().replace(/^["']|["']$/g, '');
-    const url = new URL(redisUrl);
-
     const isTls = redisUrl.startsWith('rediss://');
+    
+    // Se for rediss://, remover o 's' temporariamente para fazer parse do URL
+    const urlToParse = isTls ? redisUrl.replace('rediss://', 'redis://') : redisUrl;
+    const url = new URL(urlToParse);
+
+    // Para Redis Cloud com SSL, configurar TLS corretamente
+    const tlsConfig = isTls ? {
+      rejectUnauthorized: false,
+      // Redis Cloud requer essas configurações
+      servername: url.hostname, // SNI
+      checkServerIdentity: () => undefined, // Aceitar certificado
+    } : undefined;
 
     return {
       host: url.hostname,
-      port: Number(url.port) || 6379,
-      username: url.username || undefined,
+      port: Number(url.port) || (isTls ? 6380 : 6379),
+      // Se username não vier na URL mas for rediss://, usar 'default' (Redis Cloud padrão)
+      username: url.username || (isTls ? 'default' : undefined),
       password: url.password
         ? decodeURIComponent(url.password)
         : undefined,
-      tls: isTls ? { rejectUnauthorized: false } : undefined,
+      tls: tlsConfig,
       maxRetriesPerRequest: null,
       enableReadyCheck: false,
+      lazyConnect: false, // Conectar imediatamente para detectar erros
     };
   }
 

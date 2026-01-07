@@ -5,19 +5,18 @@ SaaS multi-tenant com agente de IA no WhatsApp para salões de beleza.
 ## Arquitetura
 
 - **Frontend**: Next.js (dashboard de configuração)
-- **Backend**: NestJS (API + orquestração)
-- **Agente IA**: Python (processamento de mensagens + memória)
+- **Backend**: NestJS (API + Agent IA integrado)
 - **Banco**: Supabase (Postgres + Auth + Storage)
 - **Fila**: Redis/BullMQ (Upstash em produção)
 - **WhatsApp**: Uazapi
+- **LLM**: OpenAI (GPT-4 via API)
 
 ## Estrutura do Monorepo
 
 ```
 apps/
   web/          # Next.js Dashboard
-  api/          # NestJS Backend
-  agent/        # Python Agent
+  api/          # NestJS Backend (inclui Agent IA)
 
 packages/
   shared/       # Types compartilhados

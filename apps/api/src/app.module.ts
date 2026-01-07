@@ -15,6 +15,7 @@ import { MetricsModule } from './modules/metrics/metrics.module';
 import { JobsModule } from './modules/jobs/jobs.module';
 import { ServicesModule } from './modules/services/services.module';
 import { StorageModule } from './modules/storage/storage.module';
+import { AgentModule } from './modules/agent/agent.module';
 import { HealthController } from './health/health.controller';
 import { getRedisConnection } from './config/redis.config';
 
@@ -40,6 +41,7 @@ import { getRedisConnection } from './config/redis.config';
     JobsModule,
     ServicesModule,
     StorageModule,
+    AgentModule,
   ],
   controllers: [HealthController],
 })

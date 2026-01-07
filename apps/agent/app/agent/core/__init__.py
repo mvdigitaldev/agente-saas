@@ -1,2 +1,0 @@
-"""Core do agente"""
-

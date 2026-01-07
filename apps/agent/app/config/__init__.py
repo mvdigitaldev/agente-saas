@@ -1,2 +1,0 @@
-"""Configurações do worker"""
-
