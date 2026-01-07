@@ -19,11 +19,17 @@ export class WhatsappController {
     @Body() payload: UazapiWebhookDto,
     @Query('instance_id') instanceId?: string,
   ) {
+    console.log('📥 Webhook recebido da Uazapi:', {
+      instanceId,
+      payloadKeys: Object.keys(payload),
+      payload: JSON.stringify(payload).substring(0, 500),
+    });
+
     try {
       await this.whatsappService.handleInboundMessage(payload, instanceId);
       return { success: true };
     } catch (error: any) {
-      console.error('Erro no webhook:', error);
+      console.error('❌ Erro no webhook:', error.message, error.stack);
       // Sempre retornar 200 para não quebrar o webhook da Uazapi
       return { success: false, error: error.message };
     }

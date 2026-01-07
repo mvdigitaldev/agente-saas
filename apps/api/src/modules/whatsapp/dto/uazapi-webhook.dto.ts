@@ -1,48 +1,76 @@
-import { IsString, IsOptional, IsObject } from 'class-validator';
+import { IsOptional, Allow } from 'class-validator';
 
+/**
+ * DTO flexível para receber webhooks da Uazapi
+ * A Uazapi envia diferentes estruturas dependendo do tipo de evento
+ * Usamos @Allow() para aceitar qualquer propriedade sem validação estrita
+ */
 export class UazapiWebhookDto {
-  @IsString()
+  @Allow()
   @IsOptional()
   id?: string;
 
-  @IsString()
+  @Allow()
   @IsOptional()
   messageId?: string;
 
-  @IsString()
+  @Allow()
   @IsOptional()
   instance_id?: string;
 
-  @IsString()
+  @Allow()
   @IsOptional()
   from?: string;
 
-  @IsString()
+  @Allow()
   @IsOptional()
   to?: string;
 
-  @IsString()
+  @Allow()
   @IsOptional()
   body?: string;
 
-  @IsString()
+  @Allow()
   @IsOptional()
   text?: string;
 
-  @IsString()
+  @Allow()
   @IsOptional()
   type?: string;
 
-  @IsObject()
+  @Allow()
+  @IsOptional()
+  event?: string;
+
+  @Allow()
   @IsOptional()
   data?: any;
 
-  @IsString()
+  @Allow()
+  @IsOptional()
+  message?: any;
+
+  @Allow()
   @IsOptional()
   notifyName?: string;
 
-  @IsString()
+  @Allow()
   @IsOptional()
   senderName?: string;
+
+  @Allow()
+  @IsOptional()
+  pushName?: string;
+
+  @Allow()
+  @IsOptional()
+  isGroup?: boolean;
+
+  @Allow()
+  @IsOptional()
+  timestamp?: number;
+
+  // Permite qualquer outra propriedade não listada
+  [key: string]: any;
 }
 
