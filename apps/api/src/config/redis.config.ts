@@ -1,11 +1,12 @@
 import { RedisOptions } from 'ioredis';
 
-export function getRedisConnection(): RedisOptions {
+export function getRedisConnection(url?: string): RedisOptions {
   console.log('🔧 getRedisConnection() chamado');
-  console.log('🔧 REDIS_URL:', process.env.REDIS_URL ? 'DEFINIDA' : 'NÃO DEFINIDA');
-  
-  if (process.env.REDIS_URL) {
-    const redisUrl = process.env.REDIS_URL.trim().replace(/^["']|["']$/g, '');
+  const connectionString = url || process.env.REDIS_URL;
+  console.log('🔧 REDIS_URL:', connectionString ? 'DEFINIDA' : 'NÃO DEFINIDA');
+
+  if (connectionString) {
+    const redisUrl = connectionString.trim().replace(/^["']|["']$/g, '');
     const isTls = redisUrl.startsWith('rediss://');
 
     console.log('🔧 URL começa com rediss://:', isTls);

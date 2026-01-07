@@ -11,7 +11,7 @@ export class WhatsappController {
   constructor(
     private readonly whatsappService: WhatsappService,
     private readonly uazapiService: UazapiService,
-  ) {}
+  ) { }
 
   @Post('uazapi')
   @HttpCode(HttpStatus.OK)
@@ -48,7 +48,7 @@ export class WhatsappSendController {
     private readonly whatsappService: WhatsappService,
     private readonly uazapiService: UazapiService,
     private readonly supabase: SupabaseService,
-  ) {}
+  ) { }
 
   /**
    * Cria uma nova instância e retorna QR code diretamente
@@ -110,7 +110,7 @@ export class WhatsappSendController {
   @Get('status')
   async getStatus(@Query('empresa_id') empresaId: string) {
     const db = this.supabase.getServiceRoleClient();
-    
+
     const { data: instance } = await db
       .from('whatsapp_instances')
       .select('*')
@@ -164,5 +164,16 @@ export class WhatsappSendController {
     },
   ) {
     return this.whatsappService.sendMedia(data);
+  }
+
+  /**
+   * Atualiza o webhook da instância (DEV LOCAL)
+   */
+  @Post('instances/:id/webhook')
+  async updateWebhook(
+    @Param('id') id: string,
+    @Query('empresa_id') empresaId: string,
+  ) {
+    return this.whatsappService.updateWebhook(id, empresaId);
   }
 }

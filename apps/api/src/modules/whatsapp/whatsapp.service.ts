@@ -71,7 +71,7 @@ export class WhatsappService {
         msg.chatid?.replace('@s.whatsapp.net', '').replace('@c.us', '') || '';
 
       const messageType = this.detectMessageType(msg, payload.EventType);
-      
+
       // Para mídia (áudio/imagem/etc), content pode ser objeto com URL
       // Extrair corpo como string e guardar URL separadamente
       let body = '';
@@ -112,12 +112,12 @@ export class WhatsappService {
     if (payload.data?.key?.remoteJid) {
       const remoteJid = payload.data.key.remoteJid;
       const phone = remoteJid.replace('@s.whatsapp.net', '').replace('@c.us', '');
-      
+
       // Extrair mídia do formato baileys
       const msg = payload.data.message;
       let mediaUrl: string | undefined;
       let mediaMimetype: string | undefined;
-      
+
       if (msg?.imageMessage) {
         mediaUrl = msg.imageMessage.url;
         mediaMimetype = msg.imageMessage.mimetype;
@@ -164,44 +164,58 @@ export class WhatsappService {
   }
 
   private detectMessageType(msg: any, defaultType: string): string {
-    // Verificar messageType explícito primeiro
-    if (msg.messageType) return msg.messageType;
+    // 1. Verificar messageType explícito (o campo mais confiável)
+    if (msg.messageType) {
+      const mt = msg.messageType.toLowerCase();
+      if (mt.includes('audio')) return 'audioMessage';
+      if (mt.includes('image')) return 'imageMessage';
+      if (mt.includes('video')) return 'videoMessage';
+      if (mt.includes('document')) return 'documentMessage';
+      if (mt.includes('sticker')) return 'stickerMessage';
+      // Se não for mídia conhecida, retorna 'message' ou o próprio tipo
+      if (mt === 'conversation' || mt === 'extendedtextmessage') return 'message';
+      return mt;
+    }
     
-    // Verificar type direto (ex: ptt = push-to-talk audio, image, audio, video, document)
+    // 2. Verificar type direto (ex: ptt = push-to-talk audio, image, audio, video, document)
     if (msg.type) {
-      const type = msg.type.toLowerCase();
-      if (type === 'ptt' || type === 'audio') return 'audioMessage';
-      if (type === 'image') return 'imageMessage';
-      if (type === 'video') return 'videoMessage';
-      if (type === 'document' || type === 'application') return 'documentMessage';
-      if (type === 'sticker') return 'stickerMessage';
+      const t = msg.type.toLowerCase();
+      if (t === 'ptt' || t === 'audio') return 'audioMessage';
+      if (t === 'image') return 'imageMessage';
+      if (t === 'video') return 'videoMessage';
+      if (t === 'document' || t === 'application') return 'documentMessage';
+      if (t === 'sticker') return 'stickerMessage';
+      if (t === 'text') return 'message';
     }
     
-    // Verificar por mimetype
+    // 3. Verificar por mimetype
     if (msg.mimetype) {
-      if (msg.mimetype.includes('audio') || msg.mimetype.includes('ogg')) return 'audioMessage';
-      if (msg.mimetype.includes('image')) return 'imageMessage';
-      if (msg.mimetype.includes('video')) return 'videoMessage';
-      if (msg.mimetype.includes('application') || msg.mimetype.includes('pdf')) return 'documentMessage';
+      const mime = msg.mimetype.toLowerCase();
+      if (mime.includes('audio') || mime.includes('ogg')) return 'audioMessage';
+      if (mime.includes('image')) return 'imageMessage';
+      if (mime.includes('video')) return 'videoMessage';
+      if (mime.includes('application') || mime.includes('pdf')) return 'documentMessage';
     }
     
-    // Verificar se content é objeto com mimetype (mídia)
+    // 4. Verificar se content é objeto com mimetype (mídia aninhada)
     if (typeof msg.content === 'object' && msg.content?.mimetype) {
-      if (msg.content.mimetype.includes('audio') || msg.content.mimetype.includes('ogg')) return 'audioMessage';
-      if (msg.content.mimetype.includes('image')) return 'imageMessage';
-      if (msg.content.mimetype.includes('video')) return 'videoMessage';
+      const mime = msg.content.mimetype.toLowerCase();
+      if (mime.includes('audio') || mime.includes('ogg')) return 'audioMessage';
+      if (mime.includes('image')) return 'imageMessage';
+      if (mime.includes('video')) return 'videoMessage';
     }
     
-    // Verificar campo URL (se tem URL provavelmente é mídia)
+    // 5. Verificar campo URL (se tem URL provavelmente é mídia) + métricas específicas
     if (msg.URL || msg.content?.URL) {
       if (msg.PTT === true || msg.content?.PTT === true) return 'audioMessage';
       if (msg.seconds || msg.content?.seconds) return 'audioMessage'; // Áudio tem duração em segundos
+      
+      // Se tiver caption e URL mas não caiu nos anteriores, assumir imagem (comum)
+      if (msg.caption || msg.content?.caption) return 'imageMessage';
     }
     
     return defaultType;
-  }
-
-  async handleInboundMessage(payload: any, instanceIdFromQuery?: string) {
+  }  async handleInboundMessage(payload: any, instanceIdFromQuery?: string) {
     const db = this.supabase.getServiceRoleClient();
 
     try {
@@ -270,17 +284,17 @@ export class WhatsappService {
           if (messageData.type === 'audioMessage') {
             // ÁUDIO: Baixar via /message/download com base64 e transcrever com Whisper
             this.logger.log('🎙️ Processando mensagem de áudio...');
-            
+
             const mediaData = await this.uazapiService.downloadMediaBase64(messageData.messageId, instance.uazapi_token);
-            
+
             if (!mediaData?.base64Data) {
               throw new Error('Não foi possível baixar o áudio');
             }
-            
+
             // Converter base64 para Buffer e criar arquivo
             const audioBuffer = Buffer.from(mediaData.base64Data, 'base64');
             const file = await OpenAI.toFile(audioBuffer, 'audio.ogg', { type: 'audio/ogg' });
-            
+
             // Transcrever com Whisper (igual ao N8N: language: pt)
             const transcription = await this.openai.audio.transcriptions.create({
               file,
@@ -294,24 +308,24 @@ export class WhatsappService {
             } else {
               messageData.body = '[Áudio sem conteúdo detectável]';
             }
-            
+
           } else if (messageData.type === 'imageMessage') {
             // IMAGEM: Baixar via /message/download com base64 e analisar com GPT-4o-mini
             this.logger.log('🖼️ Processando mensagem de imagem...');
-            
+
             const mediaData = await this.uazapiService.downloadMediaBase64(messageData.messageId, instance.uazapi_token);
-            
+
             if (!mediaData?.base64Data) {
               throw new Error('Não foi possível baixar a imagem');
             }
-            
+
             // Criar data URL para a imagem
             const mimeType = mediaData.mimetype || 'image/jpeg';
             const dataUrl = `data:${mimeType};base64,${mediaData.base64Data}`;
-            
+
             // Legenda original (caption)
             const caption = messageData.body || '';
-            
+
             // Prompt igual ao N8N
             const prompt = `#Instruções
 O usuário te enviou uma imagem a qual você deve descrever.
@@ -345,7 +359,7 @@ ${caption}
             });
 
             const description = response.choices[0]?.message?.content || 'Não foi possível analisar a imagem';
-            
+
             // Formato igual ao N8N (ContextoImagem)
             messageData.body = `<ContextoImagem>
 
@@ -359,7 +373,7 @@ ${caption}
   </MensagemUsuario>
 
 </ContextoImagem>`;
-            
+
             this.logger.log(`✅ Imagem analisada: "${description.substring(0, 50)}..."`);
           }
         } catch (error: any) {
@@ -1043,5 +1057,43 @@ ${caption}
     // Evita duplicação de mensagens no banco
 
     return result;
+  }
+
+  /**
+   * Atualiza o webhook da instância com a URL configurada no .env (WEBHOOK_BASE_URL)
+   * Útil para desenvolvimento local (Ngrok) ou correções
+   */
+  async updateWebhook(instanceId: string, empresaId: string) {
+    const db = this.supabase.getServiceRoleClient();
+
+    const { data: instance, error } = await db
+      .from('whatsapp_instances')
+      .select('instance_id, uazapi_instance_id, uazapi_token')
+      .eq('instance_id', instanceId)
+      .eq('empresa_id', empresaId)
+      .single();
+
+    if (error || !instance) {
+      throw new NotFoundException('Instância não encontrada');
+    }
+
+    if (!instance.uazapi_instance_id || !instance.uazapi_token) {
+      throw new BadRequestException('Instância sem ID ou Token do Uazapi');
+    }
+
+    // Gera URL baseada no env WEBHOOK_BASE_URL (pode ser Ngrok ou Prod)
+    // O ConfigService já leu o .env, então se estiver configurado para Ngrok, vai gerar URL certa
+    const webhookUrl = this.uazapiService.generateWebhookUrl(instance.uazapi_instance_id);
+
+    // Atualiza no Uazapi
+    await this.uazapiService.setWebhook(instance.uazapi_token, webhookUrl);
+
+    // Opcional: Atualizar no banco para refletir o estado atual
+    await db
+      .from('whatsapp_instances')
+      .update({ webhook_url: webhookUrl })
+      .eq('instance_id', instanceId);
+
+    return { success: true, webhookUrl };
   }
 }

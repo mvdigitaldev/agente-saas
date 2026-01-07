@@ -1,5 +1,5 @@
 import { Module } from '@nestjs/common';
-import { ConfigModule } from '@nestjs/config';
+import { ConfigModule, ConfigService } from '@nestjs/config';
 import { BullModule } from '@nestjs/bullmq';
 import { DatabaseModule } from './database/database.module';
 import { AuthModule } from './modules/auth/auth.module';
@@ -24,8 +24,12 @@ import { getRedisConnection } from './config/redis.config';
     ConfigModule.forRoot({
       isGlobal: true,
     }),
-    BullModule.forRoot({
-      connection: getRedisConnection(), // Instância do ioredis ou URL string
+    BullModule.forRootAsync({
+      imports: [ConfigModule],
+      useFactory: async (configService: ConfigService) => ({
+        connection: getRedisConnection(configService.get<string>('REDIS_URL')),
+      }),
+      inject: [ConfigService],
     }),
     DatabaseModule,
     AuthModule,
@@ -45,5 +49,5 @@ import { getRedisConnection } from './config/redis.config';
   ],
   controllers: [HealthController],
 })
-export class AppModule {}
+export class AppModule { }
 

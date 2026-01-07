@@ -17,13 +17,18 @@ import { ConversationsModule } from '../conversations/conversations.module';
 import { WhatsappModule } from '../whatsapp/whatsapp.module';
 import { AgentConfigModule } from '../agent-config/agent-config.module';
 import { JobsModule } from '../jobs/jobs.module';
+import { ConfigModule, ConfigService } from '@nestjs/config';
 import { getRedisConnection } from '../../config/redis.config';
 
 @Module({
   imports: [
-    BullModule.registerQueue({
+    BullModule.registerQueueAsync({
       name: 'process-inbound-message',
-      connection: getRedisConnection(),
+      imports: [ConfigModule],
+      useFactory: async (configService: ConfigService) => ({
+        connection: getRedisConnection(configService.get<string>('REDIS_URL')),
+      }),
+      inject: [ConfigService],
     }),
     SchedulingModule,
     ConversationsModule,
@@ -47,5 +52,5 @@ import { getRedisConnection } from '../../config/redis.config';
   ],
   exports: [AgentService],
 })
-export class AgentModule {}
+export class AgentModule { }
 

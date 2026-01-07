@@ -595,23 +595,32 @@ export class UazapiService {
    * @param mediaType Tipo de mídia (image, video, document)
    * @param caption Legenda opcional
    */
+  /**
+   * Enviar mídia (imagem, vídeo, áudio, documento)
+   * Baseado na documentação oficial: https://docs.uazapi.com/endpoint/post/send~media
+   */
   async sendMedia(
     token: string,
     phone: string,
-    url: string,
-    mediaType: 'image' | 'video' | 'document' = 'image',
-    caption?: string,
+    file: string, // URL ou Base64
+    type: 'image' | 'video' | 'document' | 'audio' | 'myaudio' | 'ptt' | 'ptv' | 'sticker' = 'image',
+    text?: string, // Caption
   ): Promise<any> {
     try {
+      this.logger.log(`Iniciando envio de mídia para ${phone} (tipo: ${type})`);
+      
+      // Payload estritamente conforme a documentação
       const payload: any = {
         number: phone,
-        mediatype: mediaType,
-        media: url,
+        type: type,
+        file: file, // Documentação diz que o campo é "file" (URL ou base64)
       };
 
-      if (caption) {
-        payload.caption = caption;
+      if (text) {
+        payload.text = text; // Documentação diz que o campo de caption é "text"
       }
+
+      this.logger.log(`Payload Uazapi: type=${type}, hasFile=${!!file}, hasText=${!!text}`);
 
       const response = await this.axiosInstance.post(
         '/send/media',
@@ -620,15 +629,49 @@ export class UazapiService {
           headers: {
             token,
           },
+          maxBodyLength: Infinity,
+          maxContentLength: Infinity
         },
       );
 
       return response.data;
     } catch (error: any) {
+      if (error.response?.data) {
+         this.logger.error(`Erro Uazapi: ${JSON.stringify(error.response.data)}`);
+      }
+      
+      // Se falhar com URL externa e o erro indicar problema (ex: 500), tentar converter para base64
+      // A doc diz que aceita URL, mas alguns servidores bloqueiam o acesso do bot da Uazapi
+      if (file.startsWith('http')) {
+         this.logger.warn(`Envio via URL falhou. Tentando fallback para Base64...`);
+         try {
+            const mediaBase64 = await this.downloadAndConvertToBase64(file);
+            
+            // Retry com base64
+            const retryPayload: any = {
+              number: phone,
+              type: type,
+              file: mediaBase64,
+            };
+            if (text) {
+              retryPayload.text = text;
+            }
+
+            const retryResponse = await this.axiosInstance.post(
+              '/send/media', 
+              retryPayload,
+              { headers: { token }, maxBodyLength: Infinity, maxContentLength: Infinity }
+            );
+            return retryResponse.data;
+         } catch (retryError: any) {
+            this.logger.error(`Fallback Base64 também falhou: ${retryError.message}`);
+         }
+      }
+
       this.logger.error(`Erro ao enviar mídia: ${error.message}`, error.stack);
       if (error.response) {
         throw new HttpException(
-          `Erro ao enviar mídia: ${error.response.data?.message || error.message}`,
+          `Erro ao enviar mídia: ${error.response.data?.message || JSON.stringify(error.response.data) || error.message}`,
           error.response.status || HttpStatus.INTERNAL_SERVER_ERROR,
         );
       }
@@ -637,6 +680,16 @@ export class UazapiService {
         HttpStatus.INTERNAL_SERVER_ERROR,
       );
     }
+  }
+
+  private async downloadAndConvertToBase64(url: string): Promise<string> {
+      const response = await axios.get(url, { 
+        responseType: 'arraybuffer',
+        headers: { 'User-Agent': 'Mozilla/5.0' }
+      });
+      const base64 = Buffer.from(response.data).toString('base64');
+      const mimeType = response.headers['content-type'] || 'application/octet-stream';
+      return `data:${mimeType};base64,${base64}`;
   }
 
   /**

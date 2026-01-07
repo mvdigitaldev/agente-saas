@@ -3,26 +3,39 @@ import { BullModule } from '@nestjs/bullmq';
 import { JobsService } from './jobs.service';
 import { ConversationCleanupJob } from './conversation-cleanup.job';
 import { ConversationsModule } from '../conversations/conversations.module';
+import { ConfigModule, ConfigService } from '@nestjs/config';
 import { getRedisConnection } from '../../config/redis.config';
 
 @Module({
   imports: [
-    BullModule.registerQueue({
+    BullModule.registerQueueAsync({
       name: 'process-inbound-message',
-      connection: getRedisConnection(),
+      imports: [ConfigModule],
+      useFactory: async (configService: ConfigService) => ({
+        connection: getRedisConnection(configService.get<string>('REDIS_URL')),
+      }),
+      inject: [ConfigService],
     }),
-    BullModule.registerQueue({
+    BullModule.registerQueueAsync({
       name: 'schedule-confirmations',
-      connection: getRedisConnection(),
+      imports: [ConfigModule],
+      useFactory: async (configService: ConfigService) => ({
+        connection: getRedisConnection(configService.get<string>('REDIS_URL')),
+      }),
+      inject: [ConfigService],
     }),
-    BullModule.registerQueue({
+    BullModule.registerQueueAsync({
       name: 'send-reminders',
-      connection: getRedisConnection(),
+      imports: [ConfigModule],
+      useFactory: async (configService: ConfigService) => ({
+        connection: getRedisConnection(configService.get<string>('REDIS_URL')),
+      }),
+      inject: [ConfigService],
     }),
     ConversationsModule,
   ],
   providers: [JobsService, ConversationCleanupJob],
   exports: [JobsService],
 })
-export class JobsModule {}
+export class JobsModule { }
 
