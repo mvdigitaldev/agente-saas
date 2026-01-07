@@ -44,6 +44,7 @@ export class WhatsappService {
   /**
    * Extrai dados relevantes do payload da Uazapi (formato real)
    * Formato Uazapi: { EventType, message: { chatid, content, text, messageid, sender, senderName, fromMe }, chat, owner }
+   * Para áudio/imagem, content pode ser um objeto com {URL, mimetype, fileSHA256, etc}
    */
   private extractMessageData(payload: any): {
     messageId: string;
@@ -54,6 +55,8 @@ export class WhatsappService {
     instanceId?: string;
     isFromMe: boolean;
     owner: string;
+    mediaUrl?: string;
+    mediaMimetype?: string;
   } | null {
     // Ignorar mensagens enviadas pela API (evitar loop)
     if (payload.message?.wasSentByApi === true || payload.message?.fromMe === true) {
@@ -67,15 +70,41 @@ export class WhatsappService {
       const phone = msg.sender?.replace('@s.whatsapp.net', '').replace('@c.us', '') ||
         msg.chatid?.replace('@s.whatsapp.net', '').replace('@c.us', '') || '';
 
+      const messageType = this.detectMessageType(msg, payload.EventType);
+      
+      // Para mídia (áudio/imagem/etc), content pode ser objeto com URL
+      // Extrair corpo como string e guardar URL separadamente
+      let body = '';
+      let mediaUrl: string | undefined;
+      let mediaMimetype: string | undefined;
+
+      if (typeof msg.content === 'object' && msg.content !== null) {
+        // content é objeto de mídia: {URL, mimetype, fileSHA256, fileLength, seconds, PTT, ...}
+        mediaUrl = msg.content.URL || msg.URL;
+        mediaMimetype = msg.content.mimetype || msg.mimetype;
+        body = msg.content.caption || msg.caption || ''; // Legenda da imagem, se houver
+        this.logger.log(`📎 Mídia detectada: tipo=${messageType}, url=${mediaUrl ? 'SIM' : 'NÃO'}, mimetype=${mediaMimetype}`);
+      } else if (typeof msg.URL === 'string') {
+        // URL direto no msg
+        mediaUrl = msg.URL;
+        mediaMimetype = msg.mimetype;
+        body = msg.caption || '';
+      } else {
+        // Mensagem de texto normal
+        body = msg.content || msg.text || '';
+      }
+
       return {
         messageId: msg.messageid || msg.id || `msg_${Date.now()}`,
         from: phone,
-        body: msg.content || msg.text || '',
+        body: body,
         senderName: msg.senderName || payload.chat?.name || payload.chat?.wa_name || '',
-        type: this.detectMessageType(msg, payload.EventType),
+        type: messageType,
         instanceId: undefined, // Uazapi não envia instance_id no payload, usamos query param
         isFromMe: msg.fromMe === true,
         owner: payload.owner || '',
+        mediaUrl,
+        mediaMimetype,
       };
     }
 
@@ -83,6 +112,19 @@ export class WhatsappService {
     if (payload.data?.key?.remoteJid) {
       const remoteJid = payload.data.key.remoteJid;
       const phone = remoteJid.replace('@s.whatsapp.net', '').replace('@c.us', '');
+      
+      // Extrair mídia do formato baileys
+      const msg = payload.data.message;
+      let mediaUrl: string | undefined;
+      let mediaMimetype: string | undefined;
+      
+      if (msg?.imageMessage) {
+        mediaUrl = msg.imageMessage.url;
+        mediaMimetype = msg.imageMessage.mimetype;
+      } else if (msg?.audioMessage) {
+        mediaUrl = msg.audioMessage.url;
+        mediaMimetype = msg.audioMessage.mimetype;
+      }
 
       return {
         messageId: payload.data.key.id || `msg_${Date.now()}`,
@@ -96,6 +138,8 @@ export class WhatsappService {
         instanceId: payload.instance,
         isFromMe: payload.data.key.fromMe === true,
         owner: '',
+        mediaUrl,
+        mediaMimetype,
       };
     }
 
@@ -110,6 +154,8 @@ export class WhatsappService {
         instanceId: payload.instance_id,
         isFromMe: payload.fromMe === true,
         owner: '',
+        mediaUrl: payload.mediaUrl,
+        mediaMimetype: payload.mimetype,
       };
     }
 
@@ -118,13 +164,40 @@ export class WhatsappService {
   }
 
   private detectMessageType(msg: any, defaultType: string): string {
+    // Verificar messageType explícito primeiro
     if (msg.messageType) return msg.messageType;
+    
+    // Verificar type direto (ex: ptt = push-to-talk audio, image, audio, video, document)
+    if (msg.type) {
+      const type = msg.type.toLowerCase();
+      if (type === 'ptt' || type === 'audio') return 'audioMessage';
+      if (type === 'image') return 'imageMessage';
+      if (type === 'video') return 'videoMessage';
+      if (type === 'document' || type === 'application') return 'documentMessage';
+      if (type === 'sticker') return 'stickerMessage';
+    }
+    
+    // Verificar por mimetype
     if (msg.mimetype) {
-      if (msg.mimetype.includes('audio')) return 'audioMessage';
+      if (msg.mimetype.includes('audio') || msg.mimetype.includes('ogg')) return 'audioMessage';
       if (msg.mimetype.includes('image')) return 'imageMessage';
       if (msg.mimetype.includes('video')) return 'videoMessage';
       if (msg.mimetype.includes('application') || msg.mimetype.includes('pdf')) return 'documentMessage';
     }
+    
+    // Verificar se content é objeto com mimetype (mídia)
+    if (typeof msg.content === 'object' && msg.content?.mimetype) {
+      if (msg.content.mimetype.includes('audio') || msg.content.mimetype.includes('ogg')) return 'audioMessage';
+      if (msg.content.mimetype.includes('image')) return 'imageMessage';
+      if (msg.content.mimetype.includes('video')) return 'videoMessage';
+    }
+    
+    // Verificar campo URL (se tem URL provavelmente é mídia)
+    if (msg.URL || msg.content?.URL) {
+      if (msg.PTT === true || msg.content?.PTT === true) return 'audioMessage';
+      if (msg.seconds || msg.content?.seconds) return 'audioMessage'; // Áudio tem duração em segundos
+    }
+    
     return defaultType;
   }
 
@@ -194,8 +267,17 @@ export class WhatsappService {
       // Se for áudio ou imagem e tivermos token da instância e OpenAI configurado
       if ((messageData.type === 'audioMessage' || messageData.type === 'imageMessage') && instance.uazapi_token && this.openai) {
         try {
-          // Baixar mídia
-          const mediaBuffer = await this.uazapiService.downloadMedia(messageData.messageId, instance.uazapi_token);
+          let mediaBuffer: Buffer;
+          
+          // Tentar baixar da URL direta primeiro (mais confiável)
+          if (messageData.mediaUrl) {
+            this.logger.log(`📥 Baixando mídia da URL direta: ${messageData.mediaUrl.substring(0, 50)}...`);
+            mediaBuffer = await this.uazapiService.downloadMediaFromUrl(messageData.mediaUrl);
+          } else {
+            // Fallback: usar endpoint de download por messageId
+            this.logger.log(`📥 Baixando mídia via messageId: ${messageData.messageId}`);
+            mediaBuffer = await this.uazapiService.downloadMedia(messageData.messageId, instance.uazapi_token);
+          }
 
           if (messageData.type === 'audioMessage') {
             this.logger.log('🎙️ Processando mensagem de áudio...');
@@ -257,6 +339,12 @@ export class WhatsappService {
             messageData.body = '[Erro ao processar mídia]';
           }
         }
+      }
+
+      // Garantir que body seja sempre string (proteção extra)
+      if (typeof messageData.body !== 'string') {
+        this.logger.warn('messageData.body não é string, convertendo:', typeof messageData.body);
+        messageData.body = '';
       }
 
       // Se ainda estiver vazio (ex: imagem sem legenda e falha na IA), preencher para não ser descartado

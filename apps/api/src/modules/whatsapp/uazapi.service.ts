@@ -143,6 +143,35 @@ export class UazapiService {
   }
 
   /**
+   * Baixa mídia diretamente de uma URL
+   * Usado quando o webhook já traz a URL da mídia
+   * @param url URL direta da mídia
+   * @returns Buffer do arquivo
+   */
+  async downloadMediaFromUrl(url: string): Promise<Buffer> {
+    try {
+      this.logger.log(`Baixando mídia da URL: ${url.substring(0, 80)}...`);
+
+      const response = await axios.get(url, {
+        responseType: 'arraybuffer',
+        timeout: 60000, // 60 segundos para arquivos maiores
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+        },
+      });
+
+      this.logger.log(`✅ Mídia baixada com sucesso: ${response.data.length} bytes`);
+      return Buffer.from(response.data);
+    } catch (error: any) {
+      this.logger.error(`Erro ao baixar mídia da URL: ${error.message}`, error.stack);
+      throw new HttpException(
+        `Erro ao baixar mídia da URL: ${error.message}`,
+        HttpStatus.INTERNAL_SERVER_ERROR,
+      );
+    }
+  }
+
+  /**
    * Cria uma nova instância no Uazapi
    * Documentação: https://docs.uazapi.com/
    * Endpoint: POST /instance/init
