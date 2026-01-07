@@ -72,7 +72,7 @@ export class WhatsappService {
         from: phone,
         body: msg.content || msg.text || '',
         senderName: msg.senderName || payload.chat?.name || payload.chat?.wa_name || '',
-        type: msg.messageType || payload.EventType, // Tentar pegar messageType específico (AudioMessage, ImageMessage)
+        type: this.detectMessageType(msg, payload.EventType),
         instanceId: undefined, // Uazapi não envia instance_id no payload, usamos query param
         isFromMe: msg.fromMe === true,
         owner: payload.owner || '',
@@ -117,6 +117,17 @@ export class WhatsappService {
     return null;
   }
 
+  private detectMessageType(msg: any, defaultType: string): string {
+    if (msg.messageType) return msg.messageType;
+    if (msg.mimetype) {
+      if (msg.mimetype.includes('audio')) return 'audioMessage';
+      if (msg.mimetype.includes('image')) return 'imageMessage';
+      if (msg.mimetype.includes('video')) return 'videoMessage';
+      if (msg.mimetype.includes('application') || msg.mimetype.includes('pdf')) return 'documentMessage';
+    }
+    return defaultType;
+  }
+
   async handleInboundMessage(payload: any, instanceIdFromQuery?: string) {
     const db = this.supabase.getServiceRoleClient();
 
@@ -130,7 +141,9 @@ export class WhatsappService {
       }
 
       // Ignorar mensagens vazias (se não for mídia)
-      if ((!messageData.body || messageData.body.trim() === '') && messageData.type === 'message') {
+      // Proteção extra: certificar que body é string antes de chamar trim()
+      const isBodyEmpty = !messageData.body || (typeof messageData.body === 'string' && messageData.body.trim() === '');
+      if (isBodyEmpty && messageData.type === 'message') {
         this.logger.log('Ignorando mensagem vazia');
         return;
       }

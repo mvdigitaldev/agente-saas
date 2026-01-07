@@ -158,7 +158,7 @@ export class ToolsRegistrationService implements OnModuleInit {
     this.toolRegistry.registerTool({
       name: 'list_services',
       description:
-        'Listar serviços disponíveis na empresa. Retorna lista com nomes, preços, duração, descrições e image_url para envio de fotos.',
+        'Listar serviços disponíveis na empresa. Retorna lista com nomes, preços, duração, descrições e image_url. CRÍTICO: Use esta ferramenta ANTES de enviar fotos para obter a URL correta da imagem.',
       parameters: {
         type: 'object',
         properties: {
@@ -249,7 +249,7 @@ export class ToolsRegistrationService implements OnModuleInit {
         properties: {
           url: {
             type: 'string',
-            description: 'URL da mídia a ser enviada. Deve ser uma URL válida e acessível.',
+            description: 'URL da mídia a ser enviada. Deve ser uma URL válida e acessível obtida via list_services. NUNCA invente uma URL (ex: não use example.com). Se não tiver a URL, chame list_services primeiro.',
           },
           media_type: {
             type: 'string',
