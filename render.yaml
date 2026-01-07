@@ -3,7 +3,7 @@ services:
   - type: web
     name: agente-saas-api
     env: node
-    buildCommand: cd apps/api && npm install && npm run build
+    buildCommand: npm install && cd apps/api && npx nest build
     startCommand: cd apps/api && npm run start
     envVars:
       - key: NODE_ENV
