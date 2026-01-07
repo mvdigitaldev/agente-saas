@@ -23,70 +23,109 @@ export class ConversationsService {
       whatsapp_number: data.whatsapp_number,
     });
 
-    // Upsert client
-    const { data: client, error: clientError } = await db
+    // 1. Buscar ou criar client
+    let client;
+    const { data: existingClient } = await db
       .from('clients')
-      .upsert(
-        {
-          empresa_id: data.empresa_id,
-          whatsapp_number: data.whatsapp_number,
-        },
-        {
-          onConflict: 'empresa_id,whatsapp_number',
-        },
-      )
       .select('client_id')
+      .eq('empresa_id', data.empresa_id)
+      .eq('whatsapp_number', data.whatsapp_number)
       .single();
 
-    if (clientError || !client) {
-      this.logger.error('Erro ao upsert client:', clientError);
-      throw new Error(`Erro ao criar/atualizar cliente: ${clientError?.message || 'cliente não retornado'}`);
+    if (existingClient) {
+      client = existingClient;
+      this.logger.log('Client existente encontrado:', { client_id: client.client_id });
+    } else {
+      const { data: newClient, error: clientError } = await db
+        .from('clients')
+        .insert({
+          empresa_id: data.empresa_id,
+          whatsapp_number: data.whatsapp_number,
+        })
+        .select('client_id')
+        .single();
+
+      if (clientError || !newClient) {
+        this.logger.error('Erro ao criar client:', clientError);
+        throw new Error(`Erro ao criar cliente: ${clientError?.message || 'cliente não retornado'}`);
+      }
+      client = newClient;
+      this.logger.log('Novo client criado:', { client_id: client.client_id });
     }
 
-    this.logger.log('Client upsertado:', { client_id: client.client_id });
-
-    // Upsert conversation
-    const { data: conversation, error: conversationError } = await db
+    // 2. Buscar ou criar conversation
+    let conversation;
+    const { data: existingConversation } = await db
       .from('conversations')
-      .upsert(
-        {
+      .select('conversation_id')
+      .eq('empresa_id', data.empresa_id)
+      .eq('client_id', client.client_id)
+      .single();
+
+    if (existingConversation) {
+      // Atualizar last_message_at
+      const { data: updatedConversation, error: updateError } = await db
+        .from('conversations')
+        .update({
+          last_message_at: new Date().toISOString(),
+          status: 'active',
+        })
+        .eq('conversation_id', existingConversation.conversation_id)
+        .select('conversation_id')
+        .single();
+
+      if (updateError) {
+        this.logger.error('Erro ao atualizar conversation:', updateError);
+      }
+      conversation = updatedConversation || existingConversation;
+      this.logger.log('Conversation existente atualizada:', { conversation_id: conversation.conversation_id });
+    } else {
+      const { data: newConversation, error: conversationError } = await db
+        .from('conversations')
+        .insert({
           empresa_id: data.empresa_id,
           client_id: client.client_id,
           whatsapp_instance_id: data.whatsapp_instance_id,
           status: 'active',
           last_message_at: new Date().toISOString(),
-        },
-        {
-          onConflict: 'empresa_id,client_id',
-        },
-      )
-      .select('conversation_id')
-      .single();
+        })
+        .select('conversation_id')
+        .single();
 
-    if (conversationError || !conversation) {
-      this.logger.error('Erro ao upsert conversation:', conversationError);
-      throw new Error(`Erro ao criar/atualizar conversa: ${conversationError?.message || 'conversa não retornada'}`);
+      if (conversationError || !newConversation) {
+        this.logger.error('Erro ao criar conversation:', conversationError);
+        throw new Error(`Erro ao criar conversa: ${conversationError?.message || 'conversa não retornada'}`);
+      }
+      conversation = newConversation;
+      this.logger.log('Nova conversation criada:', { conversation_id: conversation.conversation_id });
     }
 
-    this.logger.log('Conversation upsertada:', { conversation_id: conversation.conversation_id });
+    // 3. Verificar se mensagem já existe (idempotência)
+    const { data: existingMessage } = await db
+      .from('messages')
+      .select('message_id')
+      .eq('whatsapp_message_id', data.whatsapp_message_id)
+      .single();
 
-    // Insert message (usar upsert para evitar duplicatas)
+    if (existingMessage) {
+      this.logger.log('Mensagem já existe, retornando existente:', { message_id: existingMessage.message_id });
+      return {
+        conversation_id: conversation.conversation_id,
+        message_id: existingMessage.message_id,
+      };
+    }
+
+    // 4. Inserir nova mensagem
     const { data: message, error: messageError } = await db
       .from('messages')
-      .upsert(
-        {
-          empresa_id: data.empresa_id,
-          conversation_id: conversation.conversation_id,
-          whatsapp_message_id: data.whatsapp_message_id,
-          direction: data.direction,
-          role: data.role,
-          content: data.content,
-        },
-        {
-          onConflict: 'whatsapp_message_id',
-          ignoreDuplicates: false,
-        },
-      )
+      .insert({
+        empresa_id: data.empresa_id,
+        conversation_id: conversation.conversation_id,
+        whatsapp_message_id: data.whatsapp_message_id,
+        direction: data.direction,
+        role: data.role,
+        content: data.content,
+      })
       .select('message_id')
       .single();
 
