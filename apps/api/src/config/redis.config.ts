@@ -2,59 +2,62 @@ import { RedisOptions } from 'ioredis';
 
 export function getRedisConnection(): RedisOptions {
   /**
-   * PRIORIDADE 1 — REDIS_URL (Redis Cloud / Upstash)
+   * PRIORIDADE 1 — REDIS_URL
+   * TLS APENAS se a URL for rediss://
    */
   if (process.env.REDIS_URL) {
     const redisUrl = process.env.REDIS_URL.trim().replace(/^["']|["']$/g, '');
     const isTls = redisUrl.startsWith('rediss://');
-    
-    // Se for rediss://, remover o 's' temporariamente para fazer parse do URL
-    const urlToParse = isTls ? redisUrl.replace('rediss://', 'redis://') : redisUrl;
-    const url = new URL(urlToParse);
 
-    // Para Redis Cloud com SSL, configurar TLS corretamente
-    const tlsConfig = isTls ? {
-      rejectUnauthorized: false,
-      // Redis Cloud requer essas configurações
-      servername: url.hostname, // SNI
-      checkServerIdentity: () => undefined, // Aceitar certificado
-    } : undefined;
+    const normalizedUrl = isTls
+      ? redisUrl.replace('rediss://', 'redis://')
+      : redisUrl;
+
+    const url = new URL(normalizedUrl);
 
     return {
       host: url.hostname,
       port: Number(url.port) || (isTls ? 6380 : 6379),
-      // Se username não vier na URL mas for rediss://, usar 'default' (Redis Cloud padrão)
-      username: url.username || (isTls ? 'default' : undefined),
+      username: url.username || undefined,
       password: url.password
         ? decodeURIComponent(url.password)
         : undefined,
-      tls: tlsConfig,
+      ...(isTls && {
+        tls: {
+          rejectUnauthorized: false,
+          servername: url.hostname,
+          checkServerIdentity: () => undefined,
+        },
+      }),
       maxRetriesPerRequest: null,
       enableReadyCheck: false,
-      lazyConnect: false, // Conectar imediatamente para detectar erros
+      lazyConnect: false,
     };
   }
 
   /**
    * PRIORIDADE 2 — Variáveis separadas
+   * ❌ NÃO inferir TLS por hostname
+   * TLS só se REDIS_TLS=true
    */
   if (process.env.REDIS_HOST) {
-    const isTls = process.env.REDIS_HOST.includes('upstash') ||
-                  process.env.REDIS_HOST.includes('rediscloud');
+    const useTls = process.env.REDIS_TLS === 'true';
 
     return {
       host: process.env.REDIS_HOST,
       port: Number(process.env.REDIS_PORT || 6379),
       username: process.env.REDIS_USERNAME || undefined,
       password: process.env.REDIS_PASSWORD || undefined,
-      tls: isTls ? { rejectUnauthorized: false } : undefined,
+      ...(useTls && {
+        tls: { rejectUnauthorized: false },
+      }),
       maxRetriesPerRequest: null,
       enableReadyCheck: false,
     };
   }
 
   /**
-   * FALLBACK LOCAL (DEV)
+   * FALLBACK LOCAL
    */
   console.warn('⚠️ Nenhuma configuração Redis encontrada. Usando localhost.');
 
