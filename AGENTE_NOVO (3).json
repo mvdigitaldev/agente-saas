@@ -1,0 +1,4003 @@
+{
+  "name": "AGENTE_NOVO",
+  "nodes": [
+    {
+      "parameters": {
+        "amount": 2
+      },
+      "id": "57845683-1b4f-4771-ab9c-e3cd58f2395b",
+      "name": "Wait2",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [
+        4400,
+        544
+      ],
+      "webhookId": "9918f6eb-8a4c-4407-b7ec-45aab9c11fac"
+    },
+    {
+      "parameters": {},
+      "id": "a4747a9a-89a2-4a45-a575-269a82ddbabd",
+      "name": "No Operation, do nothing5",
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [
+        4208,
+        368
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Obtém o texto da saída\nconst text = $json[\"output\"];\n\n// Divide o texto em partes usando o delimitador '\\n\\n' para separar as mensagens\nconst messages = text.split('\\n\\n');\n\n// Retorna cada mensagem como um item separado\nreturn messages.map(message => ({\n    json: { message: message.trim() } // Remove espaços extras antes e depois\n}));\n"
+      },
+      "id": "cbc8de86-d7ff-45a2-8a79-da7cc612fe0e",
+      "name": "Separa mensagens",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        3712,
+        528
+      ]
+    },
+    {
+      "parameters": {
+        "options": {}
+      },
+      "type": "n8n-nodes-base.splitInBatches",
+      "typeVersion": 3,
+      "position": [
+        3952,
+        528
+      ],
+      "id": "d80704b7-507f-4d9b-bfdb-d5fee5e11a68",
+      "name": "Loop Over Items"
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "={{ $('Mensagem').item.json.message }}",
+        "options": {
+          "systemMessage": "=# Papel e Objetivo (Role e Objetivo)\nVocê é um assistente de agendamento autônomo da empresa `{{ $('GET EMPRESA').item.json.nome_fantasia }}`, atuando via WhatsApp. Sua missão é agendar, reagendar, cancelar e consultar serviços de forma precisa e rápida, seguindo todas as regras de negócio abaixo.\n\n---\n\n## Instruções Gerais\n- **Não invente IDs:** todos os IDs (serviço, colaborador, agendamento, empresa) devem vir de chamadas às ferramentas. Se faltar algum, peça ao cliente.\n- **Uso de ferramentas:** sempre que precisar de dados (serviços, profissionais, disponibilidade), chame a ferramenta correta. Se não tiver informação suficiente para preencher os parâmetros (por exemplo, `agendamento_id(number)`, `servico_id(number)` ou `colaboradorID(number)`), pergunte ao cliente ao invés de adivinhar.\n- **Nunca chame reagendar sem antes consultar `lista_agendamentos`:** para reagendar um serviço, primeiro use `lista_agendamentos(user_id)` para listar os agendamentos, mostre as opções ao cliente, mapeie a escolha para o `agendamento_id(number)` real, guarde o `servico_id(number)` e o `colaboradorID(number)` atuais e só então chame `reagendar(...)` com os parâmetros corretos.\n- **Prioridade de atendimento:** se o cliente pedir atendimento humano, chame imediatamente a tool `atendimento_humano`.\n- **PIX Reserva:** se `{{ $('Mapeia dados pix reserva').item.json.precisa_pix }}` for verdadeiro, siga o fluxo de PIX antes de chamar `agendar` ou `reagendar` (ver seção específica).\n- **Erro técnico:** peça desculpas e ofereça tentar de novo ou direcionar para atendimento humano.\n- **Memória de contexto:** use o nome do cliente (`{{ $('Encontrar Cliente').item.json.nome }}`) sempre que possível.\n\n---\n\n## Estilo de Comunicação\n- Respostas curtas e objetivas (máx. ~200 caracteres), com tom amigável e vibe Gen Z (emojis moderados).  \n- Utilize o nome do cliente para personalizar.  \n- Em caso de dúvidas ou erros, explique de forma clara e jovem.  \n\n---\n\n## Datas e Horários\n- Hoje é `{{ $now.weekdayLong }}, {{ $now.format('dd/MM/yyyy') }} às {{ $now.hour.toString().padStart(2, '0') }}:{{ $now.minute.toString().padStart(2, '0') }} (America/Sao_Paulo)`.\n- Converta expressões do cliente (“amanhã”, “dia 10 às 15h”) para formato absoluto `DD/MM/YYYY HH:mm` antes de usar as ferramentas.\n- Nunca agende datas passadas; se o cliente sugerir data passada, peça uma nova.\n\n---\n\n## Fluxos de Trabalho\nCada fluxo deve ser seguido à risca para evitar erros. Sempre confirme com o cliente antes de efetuar ações finais.\n\n### Formato de Dados para Ferramentas (Tools)\nQuando for chamar uma ferramenta (como `agendar`, `reagendar` ou `verificar_disponibilidade`), as datas e horários devem ser convertidos e fornecidos no formato **ISO 8601** (`YYYY-MM-DDThh:mm:ss`), sem informações de fuso horário.\n\n---\n\n### 1. Agendamento\n#### Escolha do serviço\n- Se o cliente não especificar serviço, chame `lista_servicos(empresaID(number))` e mostre as opções sem preços (só inclua preço se solicitado).\n- Se mencionar vários serviços, peça para escolher apenas um.\n- Se ele especificar um serviço, confira se o nome existe na lista retornada por `lista_servicos`. Caso não exista ou haja dúvida, mostre ao cliente a lista oficial e peça que escolha novamente.\n- Guarde o ID numérico (`servico_id`) do serviço escolhido. Só depois de ter esse ID é que você deve seguir para a etapa de seleção de profissional e chamadas subsequentes.\n\n#### Seleção de profissional\n- Para encontrar um profissional, você **DEVE** primeiro usar a tool `lista_servicos` para obter o `servico_id` do serviço desejado pelo cliente.\n- Se o cliente indicar um profissional, use esse nome **apenas para identificar visualmente**.  \n- Caso contrário, chame `profissionais(user_id, tipo=\"Profissionais\", empresaID(number), servico_id(number))` para listar os disponíveis.  \n- ⚠️ **IMPORTANTE:** Sempre armazene o `colaboradorID(number)` retornado pela tool.  \n  - O `colaboradorID(number)` é o único identificador válido para chamadas de ferramentas (`verificar_disponibilidade`, `agendar`, `reagendar`).  \n  - O nome (ex.: “Leonardo”) deve ser usado **apenas para exibir ao cliente**.  \n- Se o cliente disser “qualquer um”:  \n  - Peça a data e hora desejadas.  \n  - Para cada profissional retornado, chame `verificar_disponibilidade(colaboradorID(number), data_inicio, servico_id(number), data_pretendida)`.  \n  - Escolha automaticamente o horário mais próximo disponível e armazene o `colaboradorID(number)`.  \n  - Se não houver vaga no dia, amplie a busca por até 7 dias e sugira as três melhores opções.\n\n#### Confirmar data e hora\n- Converta a data informada pelo cliente para o formato necessário e chame `verificar_disponibilidade` para confirmar horários disponíveis.  \n- Ofereça os horários livres em intervalos curtos (“10:00, 10:30, 11:00…”).  \n- Se a hora desejada não estiver em um slot, mas couber pela duração, considere-a válida.  \n\n### Confirmação final\n\nSe **precisa_pix** for verdadeiro, siga o **Fluxo de PIX Reserva** (Seção “Fluxo de PIX Reserva”).\n\nCaso contrário, o agente deve pedir **apenas uma confirmação final** antes de chamar `agendar(...)`.\n\nEssa confirmação única deve conter:\n- Serviço  \n- Profissional  \n- Data e horário  \n- (Opcional) duração, somente se for realmente relevante  \n\n**Exemplo de confirmação:**  \n\"Confirmando: deseja agendar Corte de Cabelo com Leonardo dia 26/09 às 08:00 (50 min)? Posso agendar?\"\n\nApós resposta positiva do cliente, o agente deve chamar diretamente `agendar(...)` com todos os parâmetros corretos, **sem repetir novas confirmações**.\n\n---\n\n### 2. Reagendamento\n1. Liste os agendamentos futuros (`lista_agendamentos(user_id)`) e mostre-os ao cliente.  \n2. O cliente escolhe qual reagendar: mapeie a escolha para o `agendamento_id(number)` real e guarde também o `servico_id(number)` e `colaboradorID(number)` atuais.  \n3. Pergunte a nova data/hora e, se desejar, novo profissional (chame `profissionais` se necessário).  \n4. Chame `verificar_disponibilidade(...)` para o novo horário/profissional.  \n5. Confirme com o cliente e, se `precisa_pix` for verdadeiro, siga a seção de PIX; caso contrário, chame `reagendar(...)`.  \n\n---\n\n### 3. Cancelamento\n1. Liste os agendamentos futuros (`lista_agendamentos(user_id)`).  \n2. Mapeie a escolha para o `agendamento_id(number)` real.  \n3. Pergunte:  \n   > “Quer mesmo cancelar [serviço] com [profissional] em [data/hora]?”  \n4. Após confirmação, chame `cancelar(user_id, agendamento_id(number), tipo=\"Cancelar\")` e envie mensagem curta de confirmação.  \n\n---\n\n### 4. Consulta de Agendamentos\n- Chame `lista_agendamentos(user_id)` e mostre os próximos agendamentos.  \n- Pergunte se deseja reagendar, cancelar ou agendar um novo.  \n\n---\n\n### 5. Consulta de Valores\n- Se o cliente perguntar sobre preço, chame `lista_valores(user_id, tipo=\"valores\", empresaID(number))`.  \n- Se não souber o `servico_id(number)`, peça que escolha o serviço primeiro (`lista_servicos`).  \n- Informe o valor de forma concisa e pergunte se deseja agendar.  \n\n---\n\n### 6. Envio de Fotos (Obrigatório)\n- Chame a tool `envia_fotos(user_id, servico_id(number))` se o cliente quiser ver fotos do serviço.  \n\n---\n\n## Fluxo de PIX Reserva\nApós o cliente confirmar o resumo (serviço, profissional, data/hora) e `precisa_pix` estiver ativo:\n1. Consulte o preço via `lista_servicos` ou `lista_valores`.  \n2. Calcule o valor do sinal conforme `tipo_cobranca` e `valor_cobranca`:  \n   - **Percentual:** `valor_sinal = round(preco * (valor_cobranca / 100), 2)`  \n   - **Fixo:** `valor_sinal = round(valor_cobranca, 2)`  \n3. Se `valor_sinal <= 0` ou `>= preco`, peça permissão para recalcular.  \n4. Informe:  \n   > “Pra concluir, preciso de R$ {valor_sinal}. Chave PIX: `{{ $('Mapeia dados pix reserva').item.json.chave_pix }}`. Envie o comprovante 😊”  \n5. Após receber comprovante válido, chame `agendar(...)` ou `reagendar(...)` e confirme.  \n6. Se o comprovante for inválido, peça para reenviar.  \n\n---\n\n## Tratamento de Erros e Validações\n- **Serviço inválido:** “Não encontrei esse serviço. Temos: [lista curta]. Qual prefere?”  \n- **Profissional indisponível:** explique e sugira outro horário/profissional.  \n- **Data passada ou formato errado:** “Por favor, informe no formato DD/MM às HH:MM e para uma data futura.”  \n- **Falha na ferramenta:** “Ops, rolou um erro técnico 😅 Quer tentar de novo ou falar com atendimento humano?”  \n- **Solicitação humana:** se o cliente pedir, chame `atendimento_humano` imediatamente.  \n\n---\n\n## Contexto (Empresa e Cliente)\n**Empresa:**  \n- Nome: `{{ $('GET EMPRESA').item.json.nome_fantasia }}`  \n- ID: `{{ $('GET EMPRESA').item.json.id }}`  \n- Endereço: `{{ $('GET EMPRESA').item.json.endereco }} – {{ $('GET EMPRESA').item.json.bairro }}, {{ $('GET EMPRESA').item.json.numero }}`  \n- Instagram: `{{ $('GET EMPRESA').item.json.instagram }}`  \n- Nicho: `{{ $('GET EMPRESA').item.json.nicho }}`  \n- Personalidade Extra: `{{ $('GET EMPRESA').item.json.personalidade_extra }}`  \n- Regras Extras: `{{ $('GET EMPRESA').item.json.regras_extras }}`  \n\n**Cliente:**  \n- Nome: `{{ $('Encontrar Cliente').item.json.nome }}`  \n- ID da conversa (user_id): `{{ $('Encontrar Cliente').item.json.whatsapp_id }}`  \n- Data e Hora: ver seção **Datas e Horários** acima.  \n\n---\n\n## Ferramentas Disponíveis (Resumo)\n- `lista_servicos(tipo=\"serviços\", empresaID(number))` → lista serviços disponíveis (ID, nome, preço, duração, imagem). Não inclua preços a menos que o cliente peça.  \n- `profissionais(user_id, tipo=\"Profissionais\", empresaID(number), servico_id(number))` → lista profissionais que realizam o serviço.  \n  - ⚠️ Use sempre o `colaboradorID(number)` retornado.  \n  - O nome do profissional serve apenas para exibir ao cliente. Nunca use o nome como ID.  \n- `verificar_disponibilidade(colaboradorID(number), data_inicio, servico_id(number), data_pretendida)` → mostra horários disponíveis para o profissional.  \n- `agendar(...)` → faz o agendamento após confirmação e, se necessário, validação do PIX.  \n- `reagendar(...)` → altera data/hora ou profissional de um agendamento.  \n- `cancelar(...)` → cancela um agendamento existente.  \n- `lista_agendamentos(user_id, tipo=\"Agendados\")` → lista os próximos agendamentos do cliente.  \n- `lista_valores(user_id, tipo=\"valores\", empresaID(number))` → informa o preço de um serviço.  \n- `atendimento_humano(user_id, empresaID(number))` → encaminha para atendimento humano.  \n- `envia_fotos(user_id, servico_id(number))` → lista e envia as fotos do serviço solicitado.  \n\n---\n\n## Formato de Saída\n- Resposta ao cliente: texto curto (max. 200 caracteres), amigável e direto, com emojis quando fizer sentido.  \n- Confirmações: sempre confirmar antes de agendar, reagendar ou cancelar.  \n- Horários: mostre opções em formato `HH:MM` e data em `DD/MM`.  ",
+          "returnIntermediateSteps": true
+        }
+      },
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 1.8,
+      "position": [
+        3344,
+        368
+      ],
+      "id": "73a3c626-2076-42ad-8605-50d43978bb6c",
+      "name": "AI Agent1",
+      "retryOnFail": true,
+      "disabled": true
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://iagenda.uazapi.com/send/text",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Accept",
+              "value": "application/json"
+            },
+            {
+              "name": "token",
+              "value": "={{ $('Dados Lead').item.json.instancia }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "number",
+              "value": "={{ $('Encontrar Cliente').item.json.telefone }}"
+            },
+            {
+              "name": "text",
+              "value": "={{ $json.message.replaceAll('**',\"*\") }}"
+            },
+            {
+              "name": "delay",
+              "value": "3000"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        4208,
+        544
+      ],
+      "id": "cd9c6efd-cf62-4f86-be42-783c479d98ed",
+      "name": "Enviar mensagem"
+    },
+    {
+      "parameters": {
+        "rules": {
+          "values": [
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 1
+                },
+                "conditions": [
+                  {
+                    "id": "22426b30-920c-41a6-bc0a-955f02a19fff",
+                    "leftValue": "={{ $('Webhook').item.json.body.message.messageType }}",
+                    "rightValue": "Conversation",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "text2"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 1
+                },
+                "conditions": [
+                  {
+                    "id": "bc64f125-d93c-4d1d-97ae-65c0adb08b79",
+                    "leftValue": "={{ $('Webhook').item.json.body.message.messageType }}",
+                    "rightValue": "ExtendedTextMessage",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "text"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 1
+                },
+                "conditions": [
+                  {
+                    "id": "137aec3f-e95e-4d59-b9ba-1140f9fc4fb4",
+                    "leftValue": "={{ $('Webhook').item.json.body.message.messageType }}",
+                    "rightValue": "AudioMessage",
+                    "operator": {
+                      "type": "string",
+                      "operation": "contains"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "audio"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 1
+                },
+                "conditions": [
+                  {
+                    "leftValue": "={{ $('Webhook').item.json.body.message.messageType }}",
+                    "rightValue": "ImageMessage",
+                    "operator": {
+                      "type": "string",
+                      "operation": "contains"
+                    },
+                    "id": "40b284c8-fdf7-49e5-9ac3-8c5051f51521"
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "imagem"
+            }
+          ]
+        },
+        "options": {
+          "fallbackOutput": "extra",
+          "renameFallbackOutput": "Outro"
+        }
+      },
+      "id": "a336743f-d43d-460a-8797-c13897427e04",
+      "name": "Switch",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3.1,
+      "position": [
+        32,
+        576
+      ],
+      "notesInFlow": true,
+      "notes": "Ajustar condições para cada tipo de mensagem a depender da sua entrada de dados\n\n"
+    },
+    {
+      "parameters": {
+        "resource": "audio",
+        "operation": "transcribe",
+        "binaryPropertyName": "=data",
+        "options": {
+          "language": "pt"
+        }
+      },
+      "id": "b7cd3344-17e5-4619-8024-284ddae3660d",
+      "name": "Transcrever Áudio",
+      "type": "@n8n/n8n-nodes-langchain.openAi",
+      "typeVersion": 1.4,
+      "position": [
+        960,
+        448
+      ],
+      "credentials": {
+        "openAiApi": {
+          "id": "xjlWRy1vVJULw1ti",
+          "name": "OpenAi IAGENDA"
+        }
+      },
+      "notes": ""
+    },
+    {
+      "parameters": {
+        "resource": "image",
+        "operation": "analyze",
+        "modelId": {
+          "__rl": true,
+          "value": "gpt-4o-mini",
+          "mode": "list",
+          "cachedResultName": "GPT-4O-MINI"
+        },
+        "text": "=#Instruções\nO usuário te enviou uma imagem a qual você deve descrever.\n\nA imagem pode vir acompanhada de uma mensagem de texto (<MensagemUsuario>)\n\nCaso venha, utilize a mensagem anexa como contexto extra, tente capturar o sentimento da mensagem e objetivo pelo qual o usuário esteja enviando esta imagem na conversa.\n\nCrie uma resposta descrevendo as informações enviadas para que estas sejam utilizadas por um agente no futuro.\n\nLembre-se:\nEste agente apenas terá as informações que você fornecer, portanto repasse toda informação que julgar importante.\n\n#Dados\n<MensagemUsuario>\n{{ $('Mensagem Imagem').item.json.MensagemImagem }}\n</MensagemUsuario>\n",
+        "inputType": "base64",
+        "binaryPropertyName": "=data",
+        "options": {}
+      },
+      "id": "085894bc-adf0-46e7-b7b2-cd54e065fd3a",
+      "name": "OpenAI",
+      "type": "@n8n/n8n-nodes-langchain.openAi",
+      "typeVersion": 1.4,
+      "position": [
+        960,
+        640
+      ],
+      "credentials": {
+        "openAiApi": {
+          "id": "vqgbDtsbJavcnwRo",
+          "name": "OpenAi AVALIAFOTOS"
+        }
+      },
+      "notes": ""
+    },
+    {
+      "parameters": {
+        "amount": "={{ $('Parametros Fluxo').item.json.EsperaBuffer }}"
+      },
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [
+        2000,
+        624
+      ],
+      "id": "1606bb20-592b-4a42-a0b8-170d51727709",
+      "name": "Wait",
+      "webhookId": "32936c64-3fb1-4a21-9384-4d85a8300e34",
+      "notes": "
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "1bd6c365-d077-4284-9dfe-94db1cbe39bd",
+              "leftValue": "={{ $('Buffer 4').item.json.messages.last() }}",
+              "rightValue": "={{ $('Buffer 1').item.json.messages.last() }}",
+              "operator": {
+                "type": "string",
+                "operation": "equals",
+                "name": "filter.operator.equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        2352,
+        624
+      ],
+      "id": "77b7679f-9ed8-4520-87d7-8381f21adb9f",
+      "name": "ComparandoMensagens",
+      "notes": ""
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "66a91f66-e755-4120-b22f-44c814f56162",
+              "name": "message",
+              "value": "={{ $('Apagar Buffer').item.json.messages.join('\\n\\n') }}",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        2832,
+        528
+      ],
+      "id": "6a6296b1-bc3a-48f2-8c7f-3bb67c7de4a4",
+      "name": "Mensagem",
+      "notes": ""
+    },
+    {
+      "parameters": {
+        "operation": "get",
+        "propertyName": "messages",
+        "key": "={{ $('Dados Lead').item.json.IdConversa }}_buffer1",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.redis",
+      "typeVersion": 1,
+      "position": [
+        1808,
+        624
+      ],
+      "id": "76e054f2-29d0-4658-8d20-31fbd51a9cbd",
+      "name": "Buffer 1",
+      "credentials": {
+        "redis": {
+          "id": "yYD6QkYrWoxUvKCF",
+          "name": "Redis account"
+        }
+      },
+      "notes": ""
+    },
+    {
+      "parameters": {
+        "operation": "get",
+        "propertyName": "messages",
+        "key": "={{ $('Dados Lead').item.json.IdConversa }}_buffer1",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.redis",
+      "typeVersion": 1,
+      "position": [
+        2176,
+        624
+      ],
+      "id": "0c176be0-7bf0-4c55-a28f-457c9e3cd35d",
+      "name": "Buffer 4",
+      "credentials": {
+        "redis": {
+          "id": "yYD6QkYrWoxUvKCF",
+          "name": "Redis account"
+        }
+      },
+      "notes": ""
+    },
+    {
+      "parameters": {
+        "operation": "push",
+        "list": "={{ $('Dados Lead').item.json.IdConversa }}_buffer1",
+        "messageData": "={{ $json.Texto }}",
+        "tail": true
+      },
+      "type": "n8n-nodes-base.redis",
+      "typeVersion": 1,
+      "position": [
+        1216,
+        272
+      ],
+      "id": "f713f4d3-f6bb-4e7f-9a2d-ab6be230509f",
+      "name": "Add Texto Buffer",
+      "credentials": {
+        "redis": {
+          "id": "yYD6QkYrWoxUvKCF",
+          "name": "Redis account"
+        }
+      },
+      "notes": ""
+    },
+    {
+      "parameters": {
+        "operation": "delete",
+        "key": "={{ $('Dados Lead').item.json.IdConversa }}_buffer1"
+      },
+      "type": "n8n-nodes-base.redis",
+      "typeVersion": 1,
+      "position": [
+        2608,
+        528
+      ],
+      "id": "1a6662ee-cb42-48ec-8269-8e86e176d485",
+      "name": "Apagar Buffer",
+      "credentials": {
+        "redis": {
+          "id": "yYD6QkYrWoxUvKCF",
+          "name": "Redis account"
+        }
+      },
+      "notes": ""
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 1
+          },
+          "conditions": [
+            {
+              "id": "ac9c4286-34d7-4058-9bbb-985bd9c2b6e7",
+              "leftValue": 1,
+              "rightValue": 1,
+              "operator": {
+                "type": "number",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "ad328e55-1ac9-42f7-b02f-3448eba2e208",
+      "name": "Filtro Inicial",
+      "type": "n8n-nodes-base.filter",
+      "typeVersion": 2.1,
+      "position": [
+        -1776,
+        624
+      ],
+      "notes": ""
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "c1ce011b-bd95-468e-863e-f2076f644cf9",
+              "name": "Texto",
+              "value": "={{ $('Webhook').item.json.body.message.content.text }}",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        304,
+        272
+      ],
+      "id": "bd66fc52-4a83-4c71-a2be-48a6d5291054",
+      "name": "Mensagem Texto2",
+      "notes": ""
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "5efc6961-1ff7-4ef2-a772-7e9761592a3e",
+              "name": "Audio",
+              "value": "={{ $json.base64Data }}",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        496,
+        448
+      ],
+      "id": "dad6fb84-508e-48f5-8b81-4a40842c805a",
+      "name": "Mensagem Audio",
+      "notes": ""
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "5efc6961-1ff7-4ef2-a772-7e9761592a3e",
+              "name": "Imagem",
+              "value": "={{ $json.base64Data }}",
+              "type": "string"
+            },
+            {
+              "id": "f5c70ab5-7671-4bc8-9d23-65b8954ddb08",
+              "name": "MensagemImagem",
+              "value": "=",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        496,
+        640
+      ],
+      "id": "784895a7-c927-4376-a94d-869655427f8e",
+      "name": "Mensagem Imagem",
+      "notes": ""
+    },
+    {
+      "parameters": {
+        "operation": "push",
+        "list": "={{ $('Dados Lead').item.json.IdConversa }}_buffer1",
+        "messageData": "={{ $json.text }}",
+        "tail": true
+      },
+      "type": "n8n-nodes-base.redis",
+      "typeVersion": 1,
+      "position": [
+        1216,
+        448
+      ],
+      "id": "fb01e1b9-f520-4ac5-8644-242b703802d2",
+      "name": "Add Audio Buffer",
+      "credentials": {
+        "redis": {
+          "id": "yYD6QkYrWoxUvKCF",
+          "name": "Redis account"
+        }
+      },
+      "notes": ""
+    },
+    {
+      "parameters": {
+        "operation": "push",
+        "list": "={{ $('Dados Lead').item.json.IdConversa }}_buffer1",
+        "messageData": "={{ $json.Erro }}",
+        "tail": true
+      },
+      "type": "n8n-nodes-base.redis",
+      "typeVersion": 1,
+      "position": [
+        1200,
+        928
+      ],
+      "id": "aac5cff7-bed0-4e18-90e5-a4454ecd8de1",
+      "name": "Add Error Buffer",
+      "credentials": {
+        "redis": {
+          "id": "yYD6QkYrWoxUvKCF",
+          "name": "Redis account"
+        }
+      },
+      "notes": ""
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "11dc126a-e72e-431b-8db5-c78168c69439",
+              "name": "Erro",
+              "value": "<ErroFormatoMensagem>",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        272,
+        928
+      ],
+      "id": "7465ac8a-f62c-4b58-8bfe-fcdeed93697e",
+      "name": "Mensagem Erro",
+      "notes": ""
+    },
+    {
+      "parameters": {
+        "operation": "push",
+        "list": "={{ $('Dados Lead').item.json.IdConversa }}_buffer1",
+        "messageData": "=<ContextoImagem>\n\n  <DetalheImagem>\n{{ $json.content }}\n  </DetalheImagem>\n\nContexto Extra: O usuário encaminhou a mensagem a seguir junto á imagem.\n  <MensagemUsuario>\n{{ $('Mensagem Imagem').item.json.MensagemImagem }}\n  </MensagemUsuario>\n\n</ContextoImagem>",
+        "tail": true
+      },
+      "type": "n8n-nodes-base.redis",
+      "typeVersion": 1,
+      "position": [
+        1216,
+        640
+      ],
+      "id": "0a4b0bec-64f2-42da-bc9d-89152bce8dbe",
+      "name": "Add Imagem Buffer",
+      "credentials": {
+        "redis": {
+          "id": "yYD6QkYrWoxUvKCF",
+          "name": "Redis account"
+        }
+      },
+      "notes": ""
+    },
+    {
+      "parameters": {},
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [
+        2688,
+        720
+      ],
+      "id": "52997bc2-5048-4d95-9271-b186e11d39cf",
+      "name": "No Operation, do nothing",
+      "notes": ""
+    },
+    {
+      "parameters": {
+        "tableId": "clientes",
+        "fieldsUi": {
+          "fieldValues": [
+            {
+              "fieldId": "nome",
+              "fieldValue": "={{ $('Dados Lead').item.json.LeadNome }}"
+            },
+            {
+              "fieldId": "whatsapp_id",
+              "fieldValue": "={{ $('Dados Lead').item.json.IdConversa }}"
+            },
+            {
+              "fieldId": "telefone",
+              "fieldValue": "={{ $('Dados Lead').item.json.IdConversa.replaceAll('@s.whatsapp.net','') }}"
+            },
+            {
+              "fieldId": "empresa_id",
+              "fieldValue": "={{ $('GET EMPRESA').item.json.id }}"
+            }
+          ]
+        }
+      },
+      "id": "78e70806-5a47-4ab1-ad94-db4242c86f1b",
+      "name": "Criar Cliente",
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [
+        -368,
+        784
+      ],
+      "credentials": {
+        "supabaseApi": {
+          "id": "GwLnjydvilaBiQVq",
+          "name": "Supabase AGENDA"
+        }
+      },
+      "notes": ""
+    },
+    {
+      "parameters": {},
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [
+        -208,
+        464
+      ],
+      "id": "eec83519-df66-4233-89c9-07ad68a23881",
+      "name": "No Operation, do nothing2"
+    },
+    {
+      "parameters": {
+        "operation": "toBinary",
+        "sourceProperty": "Audio",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.convertToFile",
+      "typeVersion": 1.1,
+      "position": [
+        736,
+        448
+      ],
+      "id": "fe0483b4-ce77-4a28-b4a6-7291a82c404d",
+      "name": "Convert to File1"
+    },
+    {
+      "parameters": {
+        "content": "## Informações da empresa e do usuario\n\n**verifica se tem pix reserva**",
+        "height": 448,
+        "width": 976
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "position": [
+        -1808,
+        464
+      ],
+      "typeVersion": 1,
+      "id": "7814b139-a323-4292-824d-6042f0312c08",
+      "name": "Sticky Note3"
+    },
+    {
+      "parameters": {
+        "content": "## Verifica dados do cliente, se não existe, cria um",
+        "height": 624,
+        "width": 768,
+        "color": 2
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "position": [
+        -800,
+        416
+      ],
+      "typeVersion": 1,
+      "id": "fe1351a2-9f7c-4c97-85ce-5780db0c98f3",
+      "name": "Sticky Note4"
+    },
+    {
+      "parameters": {
+        "content": "## Classifica e filtra tipos diferentes de mensagens",
+        "height": 1216,
+        "width": 1488,
+        "color": 3
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "position": [
+        0,
+        0
+      ],
+      "typeVersion": 1,
+      "id": "ba07b3a6-a752-41d4-94ed-5eeb67fc12ea",
+      "name": "Sticky Note5"
+    },
+    {
+      "parameters": {
+        "operation": "toBinary",
+        "sourceProperty": "Imagem",
+        "options": {
+          "mimeType": "image/png"
+        }
+      },
+      "type": "n8n-nodes-base.convertToFile",
+      "typeVersion": 1.1,
+      "position": [
+        736,
+        640
+      ],
+      "id": "f931da2c-eb86-42be-be69-239c7b4cce81",
+      "name": "Convert to File8",
+      "notes": ""
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "c1ce011b-bd95-468e-863e-f2076f644cf9",
+              "name": "Texto",
+              "value": "={{ $('Webhook').item.json.body.message.text }}",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        304,
+        112
+      ],
+      "id": "92225713-0231-4f60-a99a-26772576afc6",
+      "name": "Mensagem Texto3",
+      "notes": ""
+    },
+    {
+      "parameters": {
+        "options": {
+          "presencePenalty": 0,
+          "temperature": "={{ $('Parametros Fluxo').item.json.ModeloTemperatura }}"
+        }
+      },
+      "id": "584fabe8-aa82-40fe-86cd-4f6b9c33ac51",
+      "name": "OpenAI Chat Model",
+      "type": "@n8n/n8n-nodes-langchain.lmChatOpenAi",
+      "typeVersion": 1,
+      "position": [
+        2672,
+        1248
+      ],
+      "credentials": {
+        "openAiApi": {
+          "id": "vqgbDtsbJavcnwRo",
+          "name": "OpenAi AVALIAFOTOS"
+        }
+      },
+      "notes": ""
+    },
+    {
+      "parameters": {},
+      "type": "@n8n/n8n-nodes-langchain.toolThink",
+      "typeVersion": 1,
+      "position": [
+        3248,
+        1280
+      ],
+      "id": "8fc9d494-6d8d-4415-8cd8-184a6081db6f",
+      "name": "Think1"
+    },
+    {
+      "parameters": {
+        "content": "## TOOLS",
+        "height": 336,
+        "width": 1760,
+        "color": 6
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "position": [
+        3232,
+        1152
+      ],
+      "typeVersion": 1,
+      "id": "0b8bf41a-7fe6-4af9-93ac-f7c1df32829d",
+      "name": "Sticky Note"
+    },
+    {
+      "parameters": {
+        "description": "chame essa tool caso o cliente queira reagendar, passando as infos necessarias, ",
+        "workflowId": {
+          "__rl": true,
+          "value": "PKhF5kOXBDNynpEv",
+          "mode": "list",
+          "cachedResultName": "REGRA_NOVA"
+        },
+        "workflowInputs": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "user_id": "={{ $('Dados Lead').item.json.IdConversa }}",
+            "agendamento_id": "={{ /*n8n-auto-generated-fromAI-override*/ $fromAI('agendamento_id', ``, 'string') }}",
+            "telefone": "={{ /*n8n-auto-generated-fromAI-override*/ $fromAI('telefone', ``, 'string') }}",
+            "email": "={{ /*n8n-auto-generated-fromAI-override*/ $fromAI('email', ``, 'string') }}",
+            "resumo": "={{ /*n8n-auto-generated-fromAI-override*/ $fromAI('resumo', ``, 'string') }}",
+            "colaboradorID": "={{ /*n8n-auto-generated-fromAI-override*/ $fromAI('colaboradorID', `disponivel na tool profissionais`, 'string') }}",
+            "empresaID": "={{ $('GET EMPRESA').item.json.id }}",
+            "tipo": "=Reagendar",
+            "data_fim": "={{ /*n8n-auto-generated-fromAI-override*/ $fromAI('data_fim', `Exemplo do Formato: 2025-09-28T14:00:00`, 'string') }}",
+            "data_inicio": "={{ /*n8n-auto-generated-fromAI-override*/ $fromAI('data_inicio', `Exemplo do Formato: 2025-09-28T14:00:00`, 'string') }}",
+            "nome": "={{ /*n8n-auto-generated-fromAI-override*/ $fromAI('nome', ``, 'string') }}",
+            "servico_id": "={{ /*n8n-auto-generated-fromAI-override*/ $fromAI('servico_id', `id do serviço - servico_id(number) - não invente essa informação, disponível na tool lista_servicos`, 'string') }}"
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "user_id",
+              "displayName": "user_id",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string"
+            },
+            {
+              "id": "agendamento_id",
+              "displayName": "agendamento_id",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string"
+            },
+            {
+              "id": "telefone",
+              "displayName": "telefone",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string"
+            },
+            {
+              "id": "email",
+              "displayName": "email",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string"
+            },
+            {
+              "id": "nome",
+              "displayName": "nome",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string"
+            },
+            {
+              "id": "data_inicio",
+              "displayName": "data_inicio",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string"
+            },
+            {
+              "id": "data_fim",
+              "displayName": "data_fim",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string"
+            },
+            {
+              "id": "tipo",
+              "displayName": "tipo",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string"
+            },
+            {
+              "id": "empresaID",
+              "displayName": "empresaID",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string"
+            },
+            {
+              "id": "colaboradorID",
+              "displayName": "colaboradorID",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string"
+            },
+            {
+              "id": "resumo",
+              "displayName": "resumo",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string"
+            },
+            {
+              "id": "servico_id",
+              "displayName": "servico_id",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false
+            },
+            {
+              "id": "data_pretendida",
+              "displayName": "data_pretendida",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": true
+            },
+            {
+              "id": "motivo_transferencia",
+              "displayName": "motivo_transferencia",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": true
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        }
+      },
+      "type": "@n8n/n8n-nodes-langchain.toolWorkflow",
+      "typeVersion": 2.2,
+      "position": [
+        3680,
+        1280
+      ],
+      "id": "a7172abc-5dbb-4ef3-b964-bbcca8c878fa",
+      "name": "reagendar"
+    },
+    {
+      "parameters": {
+        "description": "chame essa tool caso o cliente queira cancelar, passando as infos necessarias",
+        "workflowId": {
+          "__rl": true,
+          "value": "PKhF5kOXBDNynpEv",
+          "mode": "list",
+          "cachedResultName": "REGRA_NOVA"
+        },
+        "workflowInputs": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "user_id": "={{ $('Dados Lead').item.json.IdConversa }}",
+            "agendamento_id": "={{ /*n8n-auto-generated-fromAI-override*/ $fromAI('agendamento_id', ``, 'string') }}",
+            "tipo": "Cancelar"
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "user_id",
+              "displayName": "user_id",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string"
+            },
+            {
+              "id": "agendamento_id",
+              "displayName": "agendamento_id",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string"
+            },
+            {
+              "id": "telefone",
+              "displayName": "telefone",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": true
+            },
+            {
+              "id": "email",
+              "displayName": "email",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": true
+            },
+            {
+              "id": "nome",
+              "displayName": "nome",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": true
+            },
+            {
+              "id": "data_inicio",
+              "displayName": "data_inicio",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": true
+            },
+            {
+              "id": "data_fim",
+              "displayName": "data_fim",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": true
+            },
+            {
+              "id": "tipo",
+              "displayName": "tipo",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false
+            },
+            {
+              "id": "empresaID",
+              "displayName": "empresaID",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": true
+            },
+            {
+              "id": "colaboradorID",
+              "displayName": "colaboradorID",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": true
+            },
+            {
+              "id": "resumo",
+              "displayName": "resumo",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": true
+            },
+            {
+              "id": "serviçoid",
+              "displayName": "serviçoid",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": true
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        }
+      },
+      "type": "@n8n/n8n-nodes-langchain.toolWorkflow",
+      "typeVersion": 2.2,
+      "position": [
+        3808,
+        1280
+      ],
+      "id": "231c055f-5649-49d5-ad74-00efeb9ff462",
+      "name": "cancelar"
+    },
+    {
+      "parameters": {
+        "description": "chame esta tool APENAS quando tiver o 'servi_oid' (ID do serviço) em mãos. Se não tiver, chame primeiro a 'lista_servicos'. Esta ferramenta irá listar os profissionais que realizam um serviço específico.",
+        "workflowId": {
+          "__rl": true,
+          "value": "PKhF5kOXBDNynpEv",
+          "mode": "list",
+          "cachedResultName": "REGRA_NOVA"
+        },
+        "workflowInputs": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "empresaID": "={{ $('GET EMPRESA').item.json.id }}",
+            "tipo": "=Profissionais",
+            "user_id": "={{ $('Dados Lead').item.json.IdConversa }}",
+            "servico_id": "={{ /*n8n-auto-generated-fromAI-override*/ $fromAI('servico_id', `id do serviço - servico_id(number) - não invente essa informação, disponível na tool lista_servicos`, 'string') }}"
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "user_id",
+              "displayName": "user_id",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string"
+            },
+            {
+              "id": "agendamento_id",
+              "displayName": "agendamento_id",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": true
+            },
+            {
+              "id": "telefone",
+              "displayName": "telefone",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": true
+            },
+            {
+              "id": "email",
+              "displayName": "email",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": true
+            },
+            {
+              "id": "nome",
+              "displayName": "nome",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": true
+            },
+            {
+              "id": "data_inicio",
+              "displayName": "data_inicio",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": true
+            },
+            {
+              "id": "data_fim",
+              "displayName": "data_fim",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": true
+            },
+            {
+              "id": "tipo",
+              "displayName": "tipo",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string"
+            },
+            {
+              "id": "empresaID",
+              "displayName": "empresaID",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string"
+            },
+            {
+              "id": "colaboradorID",
+              "displayName": "colaboradorID",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "number",
+              "removed": true
+            },
+            {
+              "id": "resumo",
+              "displayName": "resumo",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": true
+            },
+            {
+              "id": "servico_id",
+              "displayName": "servico_id",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "number",
+              "removed": false
+            },
+            {
+              "id": "data_pretendida",
+              "displayName": "data_pretendida",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": true
+            },
+            {
+              "id": "motivo_transferencia",
+              "displayName": "motivo_transferencia",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": true
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        }
+      },
+      "type": "@n8n/n8n-nodes-langchain.toolWorkflow",
+      "typeVersion": 2.2,
+      "position": [
+        3952,
+        1280
+      ],
+      "id": "725918d0-1673-496d-8ae8-2e67a2a43ab8",
+      "name": "profissionais"
+    },
+    {
+      "parameters": {
+        "description": "chame essa tool para Exibir ao cliente uma lista de serviços agrupando opções semelhantes, corrigindo possíveis erros de digitação e diferenciando serviços com nomes genéricos. Quando o serviço for genérico (ex: “design”), mostra todas as variações possíveis, como “design de cílios” ou “design de sobrancelhas”, facilitando a escolha certa.",
+        "workflowId": {
+          "__rl": true,
+          "value": "PKhF5kOXBDNynpEv",
+          "mode": "list",
+          "cachedResultName": "REGRA_NOVA"
+        },
+        "workflowInputs": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "empresaID": "={{ $('GET EMPRESA').item.json.id }}",
+            "tipo": "=serviços"
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "user_id",
+              "displayName": "user_id",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": true
+            },
+            {
+              "id": "agendamento_id",
+              "displayName": "agendamento_id",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": true
+            },
+            {
+              "id": "telefone",
+              "displayName": "telefone",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": true
+            },
+            {
+              "id": "email",
+              "displayName": "email",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": true
+            },
+            {
+              "id": "nome",
+              "displayName": "nome",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": true
+            },
+            {
+              "id": "data_inicio",
+              "displayName": "data_inicio",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": true
+            },
+            {
+              "id": "data_fim",
+              "displayName": "data_fim",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": true
+            },
+            {
+              "id": "tipo",
+              "displayName": "tipo",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string"
+            },
+            {
+              "id": "empresaID",
+              "displayName": "empresaID",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string"
+            },
+            {
+              "id": "colaboradorID",
+              "displayName": "colaboradorID",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": true
+            },
+            {
+              "id": "resumo",
+              "displayName": "resumo",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": true
+            },
+            {
+              "id": "serviçoid",
+              "displayName": "serviçoid",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": true
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        }
+      },
+      "type": "@n8n/n8n-nodes-langchain.toolWorkflow",
+      "typeVersion": 2.2,
+      "position": [
+        4096,
+        1280
+      ],
+      "id": "62430c84-22a3-44b3-9ca7-bb722c65a89b",
+      "name": "lista_servicos"
+    },
+    {
+      "parameters": {
+        "description": "Exibe ao cliente a lista de agendamentos futuros, agrupando por data e serviço, corrigindo possíveis variações de nomes ou horários. Facilita a visualização dos próximos compromissos e evita confusões com agendamentos duplicados ou com nomes semelhantes.",
+        "workflowId": {
+          "__rl": true,
+          "value": "PKhF5kOXBDNynpEv",
+          "mode": "list",
+          "cachedResultName": "REGRA_NOVA"
+        },
+        "workflowInputs": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "tipo": "=Agendados",
+            "user_id": "={{ $('Dados Lead').item.json.IdConversa }}"
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "user_id",
+              "displayName": "user_id",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string"
+            },
+            {
+              "id": "agendamento_id",
+              "displayName": "agendamento_id",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": true
+            },
+            {
+              "id": "telefone",
+              "displayName": "telefone",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": true
+            },
+            {
+              "id": "email",
+              "displayName": "email",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": true
+            },
+            {
+              "id": "nome",
+              "displayName": "nome",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": true
+            },
+            {
+              "id": "data_inicio",
+              "displayName": "data_inicio",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": true
+            },
+            {
+              "id": "data_fim",
+              "displayName": "data_fim",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": true
+            },
+            {
+              "id": "tipo",
+              "displayName": "tipo",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string"
+            },
+            {
+              "id": "empresaID",
+              "displayName": "empresaID",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": true
+            },
+            {
+              "id": "colaboradorID",
+              "displayName": "colaboradorID",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": true
+            },
+            {
+              "id": "resumo",
+              "displayName": "resumo",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": true
+            },
+            {
+              "id": "serviçoid",
+              "displayName": "serviçoid",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": true
+            },
+            {
+              "id": "data_pretendida",
+              "displayName": "data_pretendida",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": true
+            },
+            {
+              "id": "motivo_transferencia",
+              "displayName": "motivo_transferencia",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": true
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        }
+      },
+      "type": "@n8n/n8n-nodes-langchain.toolWorkflow",
+      "typeVersion": 2.2,
+      "position": [
+        4256,
+        1280
+      ],
+      "id": "98944b1e-0a5a-4b05-9895-4efc7df0c8d3",
+      "name": "Lista_agendamentos"
+    },
+    {
+      "parameters": {
+        "description": "Exibe ao cliente a lista de valores dos serviços disponíveis, agrupando serviços semelhantes e corrigindo variações de nome. Mostra de forma clara o preço de cada serviço, evitando confusão caso existam serviços com nomes parecidos ou erros de digitação.",
+        "workflowId": {
+          "__rl": true,
+          "value": "PKhF5kOXBDNynpEv",
+          "mode": "list",
+          "cachedResultName": "REGRA_NOVA"
+        },
+        "workflowInputs": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "empresaID": "={{ $('GET EMPRESA').item.json.id }}",
+            "tipo": "=valores",
+            "user_id": "={{ $('Dados Lead').item.json.IdConversa }}"
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "user_id",
+              "displayName": "user_id",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string"
+            },
+            {
+              "id": "agendamento_id",
+              "displayName": "agendamento_id",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": true
+            },
+            {
+              "id": "telefone",
+              "displayName": "telefone",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": true
+            },
+            {
+              "id": "email",
+              "displayName": "email",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": true
+            },
+            {
+              "id": "nome",
+              "displayName": "nome",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": true
+            },
+            {
+              "id": "data_inicio",
+              "displayName": "data_inicio",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": true
+            },
+            {
+              "id": "data_fim",
+              "displayName": "data_fim",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": true
+            },
+            {
+              "id": "tipo",
+              "displayName": "tipo",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string"
+            },
+            {
+              "id": "empresaID",
+              "displayName": "empresaID",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string"
+            },
+            {
+              "id": "colaboradorID",
+              "displayName": "colaboradorID",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": true
+            },
+            {
+              "id": "resumo",
+              "displayName": "resumo",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": true
+            },
+            {
+              "id": "serviçoid",
+              "displayName": "serviçoid",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": true
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        }
+      },
+      "type": "@n8n/n8n-nodes-langchain.toolWorkflow",
+      "typeVersion": 2.2,
+      "position": [
+        4416,
+        1280
+      ],
+      "id": "61a7e98c-4a98-4517-b53c-1cce502470f7",
+      "name": "lista_valores"
+    },
+    {
+      "parameters": {
+        "description": "chame essa tool caso o cliente queira agendar, passando as infos necessarias",
+        "workflowId": {
+          "__rl": true,
+          "value": "PKhF5kOXBDNynpEv",
+          "mode": "list",
+          "cachedResultName": "REGRA_NOVA"
+        },
+        "workflowInputs": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "user_id": "={{ $('Dados Lead').item.json.IdConversa }}",
+            "telefone": "={{ $('Encontrar Cliente').item.json.telefone }}",
+            "resumo": "={{ /*n8n-auto-generated-fromAI-override*/ $fromAI('resumo', ``, 'string') }}",
+            "colaboradorID": "={{ /*n8n-auto-generated-fromAI-override*/ $fromAI('colaboradorID', `ID do colaborador obtido na tool lista_profissionais (number)`, 'string') }}",
+            "empresaID": "={{ $('GET EMPRESA').item.json.id }}",
+            "tipo": "=Agendar",
+            "data_fim": "={{ /*n8n-auto-generated-fromAI-override*/ $fromAI('data_fim', `Exemplo do Formato: 2025-09-28T14:00:00`, 'string') }}",
+            "data_inicio": "={{ /*n8n-auto-generated-fromAI-override*/ $fromAI('data_inicio', `Exemplo do Formato: 2025-09-28T14:00:00`, 'string') }}",
+            "nome": "={{ $('Encontrar Cliente').item.json.nome }}",
+            "email": "={{ $('Encontrar Cliente').item.json.email }}",
+            "servico_id": "={{ /*n8n-auto-generated-fromAI-override*/ $fromAI('servico_id', `id do serviço - servico_id(number) - não invente essa informação, disponível na tool lista_servicos`, 'string') }}"
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "user_id",
+              "displayName": "user_id",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string"
+            },
+            {
+              "id": "agendamento_id",
+              "displayName": "agendamento_id",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": true
+            },
+            {
+              "id": "telefone",
+              "displayName": "telefone",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string"
+            },
+            {
+              "id": "email",
+              "displayName": "email",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string"
+            },
+            {
+              "id": "nome",
+              "displayName": "nome",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string"
+            },
+            {
+              "id": "data_inicio",
+              "displayName": "data_inicio",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string"
+            },
+            {
+              "id": "data_fim",
+              "displayName": "data_fim",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string"
+            },
+            {
+              "id": "tipo",
+              "displayName": "tipo",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string"
+            },
+            {
+              "id": "empresaID",
+              "displayName": "empresaID",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string"
+            },
+            {
+              "id": "colaboradorID",
+              "displayName": "colaboradorID",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string"
+            },
+            {
+              "id": "resumo",
+              "displayName": "resumo",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string"
+            },
+            {
+              "id": "servico_id",
+              "displayName": "servico_id",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false
+            },
+            {
+              "id": "data_pretendida",
+              "displayName": "data_pretendida",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": true
+            },
+            {
+              "id": "motivo_transferencia",
+              "displayName": "motivo_transferencia",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": true
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        }
+      },
+      "type": "@n8n/n8n-nodes-langchain.toolWorkflow",
+      "typeVersion": 2.2,
+      "position": [
+        3536,
+        1280
+      ],
+      "id": "edc33e1a-5659-4f94-9c70-f0c556dde725",
+      "name": "agendar"
+    },
+    {
+      "parameters": {
+        "description": "=chame essa tool caso o cliente de a entender que quer marcar um horario, verificar a disponibilidade do dia, voce precisa passar o colaboradorId e o servicoId para a tool, tambem passar a data que o cliente quer",
+        "workflowId": {
+          "__rl": true,
+          "value": "PKhF5kOXBDNynpEv",
+          "mode": "list",
+          "cachedResultName": "REGRA_NOVA"
+        },
+        "workflowInputs": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "colaboradorID": "={{ /*n8n-auto-generated-fromAI-override*/ $fromAI('colaboradorID', `id do Colaborador - colaboradorID(number) - não invente essa informação, disponível na tool profissionais`, 'number') }}",
+            "tipo": "=Disponibilidade",
+            "data_fim": "={{ /*n8n-auto-generated-fromAI-override*/ $fromAI('data_fim', `Exemplo do Formato: 2025-09-28T14:00:00`, 'string') }}",
+            "data_inicio": "={{ /*n8n-auto-generated-fromAI-override*/ $fromAI('data_inicio', `Exemplo do Formato: 2025-09-28T14:00:00`, 'string') }}",
+            "empresaID": "={{ $('GET EMPRESA').item.json.id }}",
+            "data_pretendida": "={{ /*n8n-auto-generated-fromAI-override*/ $fromAI('data_pretendida', ``, 'string') }}",
+            "user_id": "={{ $('Dados Lead').item.json.IdConversa }}",
+            "servico_id": "={{ /*n8n-auto-generated-fromAI-override*/ $fromAI('servico_id', `id do serviço - servico_id(number) - não invente essa informação, disponível na tool lista_servicos`, 'string') }}"
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "user_id",
+              "displayName": "user_id",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string"
+            },
+            {
+              "id": "agendamento_id",
+              "displayName": "agendamento_id",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": true
+            },
+            {
+              "id": "telefone",
+              "displayName": "telefone",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": true
+            },
+            {
+              "id": "email",
+              "displayName": "email",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": true
+            },
+            {
+              "id": "nome",
+              "displayName": "nome",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": true
+            },
+            {
+              "id": "data_inicio",
+              "displayName": "data_inicio",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string"
+            },
+            {
+              "id": "data_fim",
+              "displayName": "data_fim",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string"
+            },
+            {
+              "id": "tipo",
+              "displayName": "tipo",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string"
+            },
+            {
+              "id": "empresaID",
+              "displayName": "empresaID",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false
+            },
+            {
+              "id": "colaboradorID",
+              "displayName": "colaboradorID",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "number"
+            },
+            {
+              "id": "resumo",
+              "displayName": "resumo",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": true
+            },
+            {
+              "id": "servico_id",
+              "displayName": "servico_id",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "number",
+              "removed": false
+            },
+            {
+              "id": "data_pretendida",
+              "displayName": "data_pretendida",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false
+            },
+            {
+              "id": "motivo_transferencia",
+              "displayName": "motivo_transferencia",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": true
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        }
+      },
+      "type": "@n8n/n8n-nodes-langchain.toolWorkflow",
+      "typeVersion": 2.2,
+      "position": [
+        3392,
+        1280
+      ],
+      "id": "5d50875d-f84f-4ff2-9139-b4aebdc69f78",
+      "name": "verificar_disponibilidade"
+    },
+    {
+      "parameters": {
+        "operation": "get",
+        "tableId": "clientes",
+        "filters": {
+          "conditions": [
+            {
+              "keyName": "whatsapp_id",
+              "keyValue": "={{ $('Dados Lead').item.json.IdConversa }}"
+            }
+          ]
+        }
+      },
+      "id": "3829e023-99aa-4c51-80f7-334525fb63a8",
+      "name": "Encontrar Cliente",
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [
+        -736,
+        624
+      ],
+      "alwaysOutputData": true,
+      "credentials": {
+        "supabaseApi": {
+          "id": "GwLnjydvilaBiQVq",
+          "name": "Supabase AGENDA"
+        }
+      },
+      "notes": ""
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "0e2e8132-6a3e-46f5-94fd-bf5c3b700d05",
+              "leftValue": "={{ $json.id }}",
+              "rightValue": "",
+              "operator": {
+                "type": "number",
+                "operation": "exists",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        -576,
+        624
+      ],
+      "id": "0e4f7137-6c13-4f77-b0eb-54111aa1c91b",
+      "name": "encontrou_cliente?"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 1
+          },
+          "conditions": [
+            {
+              "id": "3419c30f-4400-401b-bf40-db1579507f96",
+              "leftValue": "={{ $('Encontrar Cliente').item.json.Ia_pausada }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "ae2bf4ff-6d83-4715-bde3-5920956fed32",
+      "name": "IA_pausada?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.1,
+      "position": [
+        -368,
+        608
+      ],
+      "alwaysOutputData": false,
+      "notes": ""
+    },
+    {
+      "parameters": {
+        "operation": "get",
+        "propertyName": "AgenteStatus",
+        "key": "={{ $('Dados Lead').item.json.IdConversa }}_status1",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.redis",
+      "typeVersion": 1,
+      "position": [
+        -976,
+        624
+      ],
+      "id": "fdb7ec10-a224-45f1-b1ca-d1cd40d90e01",
+      "name": "Redis",
+      "credentials": {
+        "redis": {
+          "id": "yYD6QkYrWoxUvKCF",
+          "name": "Redis account"
+        }
+      },
+      "notes": ""
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "72c08b1d-48ae-4a33-8eb8-180d6daed55c",
+              "name": "precisa_pix",
+              "value": "={{ $json.pix_reserva }}",
+              "type": "boolean"
+            },
+            {
+              "id": "565339ea-4d72-41b3-bdee-4448017e1b07",
+              "name": "chave_pix",
+              "value": "={{ $json.chave_pix }}",
+              "type": "string"
+            },
+            {
+              "id": "59795d6e-4d85-4779-bfa6-f78a89a41395",
+              "name": "tipo_cobranca",
+              "value": "={{ $json.tipo_cobranca }}",
+              "type": "string"
+            },
+            {
+              "id": "fe6ff726-5ce0-49e3-b890-55ccd236ca71",
+              "name": "valor_cobranca",
+              "value": "={{ $json.valor_cobranca }}",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        -1152,
+        624
+      ],
+      "id": "4d2226e2-0bae-48d2-b7f3-8c10f34cb037",
+      "name": "Mapeia dados pix reserva"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "select \n  pix_reserva,\n  chave_pix,\n  tipo_cobranca,\n  valor_cobranca\n  from empresas\nwhere \n  id = {{ $json.id }} and\n  pix_reserva = true",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        -1328,
+        624
+      ],
+      "id": "be50c381-a45e-4b7e-932e-801ddb86f4e1",
+      "name": "Verifica se tem pix reserva",
+      "alwaysOutputData": true,
+      "credentials": {
+        "postgres": {
+          "id": "nLQKGLJ9RsZj1twj",
+          "name": "Postgres AGENDA"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "get",
+        "tableId": "empresas",
+        "filters": {
+          "conditions": [
+            {
+              "keyName": "nome_instancia",
+              "keyValue": "={{ $json.instancia }}"
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [
+        -1488,
+        624
+      ],
+      "id": "89d11402-a24d-4409-82a1-53da5fdbb8c3",
+      "name": "GET EMPRESA",
+      "alwaysOutputData": true,
+      "credentials": {
+        "supabaseApi": {
+          "id": "GwLnjydvilaBiQVq",
+          "name": "Supabase AGENDA"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "9f488c5c-0b3b-48e9-87b1-5a22d513d1ec",
+              "name": "IdConversa",
+              "value": "={{ $('Webhook').item.json.body.message.chatid }}",
+              "type": "string"
+            },
+            {
+              "id": "69f6217f-9063-423f-abf4-e94f6b70f94e",
+              "name": "LeadNome",
+              "value": "={{ $('Webhook').item.json.body.chat.wa_name }}",
+              "type": "string"
+            },
+            {
+              "id": "4a348790-c278-4640-b7c2-f3a69d0d576d",
+              "name": "instancia",
+              "value": "={{ $('Webhook').item.json.body.token }}",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "4ba7a69a-5ffb-47b1-ad9e-93b19ec12b81",
+      "name": "Dados Lead",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        -1632,
+        624
+      ],
+      "notes": ""
+    },
+    {
+      "parameters": {
+        "operation": "update",
+        "tableId": "clientes",
+        "filters": {
+          "conditions": [
+            {
+              "keyName": "whatsapp_id",
+              "condition": "eq",
+              "keyValue": "={{ $('Webhook').item.json.body.message.chatid }}"
+            }
+          ]
+        },
+        "fieldsUi": {
+          "fieldValues": [
+            {
+              "fieldId": "Ia_pausada",
+              "fieldValue": "true"
+            },
+            {
+              "fieldId": "ultima_interação",
+              "fieldValue": "={{ $now }}"
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [
+        -2000,
+        880
+      ],
+      "id": "b8d7b1de-9bf5-4e2e-8279-8661caaac9e5",
+      "name": "desativa_agente",
+      "credentials": {
+        "supabaseApi": {
+          "id": "GwLnjydvilaBiQVq",
+          "name": "Supabase AGENDA"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "533cc04e-be86-417d-a9db-3a6f7c0248ae",
+              "leftValue": "={{ $json.body.message.fromMe }}",
+              "rightValue": "5511958493514@s.whatsapp.net",
+              "operator": {
+                "type": "boolean",
+                "operation": "false",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "or"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        -2192,
+        640
+      ],
+      "id": "8948cb16-ab1f-4aa2-bfde-d32a2566c321",
+      "name": "fromMe?"
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "3bdce7b6-d0f1-442c-aafd-8cd123aa21b6",
+              "name": "EsperaBuffer",
+              "value": 6,
+              "type": "number"
+            },
+            {
+              "id": "c38e8985-4494-40a4-878e-f25467849842",
+              "name": "TempoInatividadeAgente",
+              "value": 900,
+              "type": "number"
+            },
+            {
+              "id": "ac619a5e-1438-4e19-aaf5-21dfcbc32312",
+              "name": "ModeloTemperatura",
+              "value": 0.3,
+              "type": "number"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        -2000,
+        624
+      ],
+      "id": "520e7bba-de9e-4acc-9a0b-a353b16164ce",
+      "name": "Parametros Fluxo",
+      "notes": ""
+    },
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "agenda-v4-homolog",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        -2400,
+        640
+      ],
+      "id": "9bce8067-64f7-4252-a0d4-a336035e6fcb",
+      "name": "Webhook",
+      "webhookId": "cc03eb24-ffc9-4160-af71-3de6a5e55e8c"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://iagenda.uazapi.com/message/download",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Accept",
+              "value": "application/json"
+            },
+            {
+              "name": "token",
+              "value": "={{ $('Dados Lead').item.json.instancia }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "id",
+              "value": "={{ $('Webhook').item.json.body.message.messageid }}"
+            },
+            {
+              "name": "return_base64",
+              "value": "true"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        288,
+        640
+      ],
+      "id": "d94badb7-4af6-4260-ad01-09b2ddfcabb2",
+      "name": "Trata Imagem"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://iagenda.uazapi.com/message/download",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Accept",
+              "value": "application/json"
+            },
+            {
+              "name": "token",
+              "value": "={{ $('Dados Lead').item.json.instancia }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "id",
+              "value": "={{ $('Webhook').item.json.body.message.messageid }}"
+            },
+            {
+              "name": "return_base64",
+              "value": "true"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        288,
+        448
+      ],
+      "id": "1c0ed2cd-3a26-4fb5-9463-c18a483abe74",
+      "name": "Trata audio"
+    },
+    {
+      "parameters": {
+        "sessionIdType": "customKey",
+        "sessionKey": "=memoriaID4177{{ $('Encontrar Cliente').item.json.whatsapp_id }}",
+        "tableName": "Agenda",
+        "contextWindowLength": 10
+      },
+      "type": "@n8n/n8n-nodes-langchain.memoryPostgresChat",
+      "typeVersion": 1.3,
+      "position": [
+        2816,
+        1248
+      ],
+      "id": "1e77754b-2588-4e6f-8515-7e47454351f9",
+      "name": "Postgres Chat Memory",
+      "credentials": {
+        "postgres": {
+          "id": "nLQKGLJ9RsZj1twj",
+          "name": "Postgres AGENDA"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "description": "chame essa tool quando voce entender que o cliente quiser falar com um humano.",
+        "workflowId": {
+          "__rl": true,
+          "value": "PKhF5kOXBDNynpEv",
+          "mode": "list",
+          "cachedResultName": "REGRA_NOVA"
+        },
+        "workflowInputs": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "tipo": "Humano",
+            "empresaID": "={{ $('GET EMPRESA').item.json.id }}",
+            "telefone": "={{ $('Encontrar Cliente').item.json.telefone }}",
+            "user_id": "={{ $('Encontrar Cliente').item.json.whatsapp_id }}",
+            "motivo_transferencia": "={{ /*n8n-auto-generated-fromAI-override*/ $fromAI('motivo_transferencia', `preencha com o motivo de transferência`, 'string') }}"
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "user_id",
+              "displayName": "user_id",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false
+            },
+            {
+              "id": "agendamento_id",
+              "displayName": "agendamento_id",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": true
+            },
+            {
+              "id": "telefone",
+              "displayName": "telefone",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false
+            },
+            {
+              "id": "email",
+              "displayName": "email",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": true
+            },
+            {
+              "id": "nome",
+              "displayName": "nome",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": true
+            },
+            {
+              "id": "data_inicio",
+              "displayName": "data_inicio",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": true
+            },
+            {
+              "id": "data_fim",
+              "displayName": "data_fim",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": true
+            },
+            {
+              "id": "tipo",
+              "displayName": "tipo",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false
+            },
+            {
+              "id": "empresaID",
+              "displayName": "empresaID",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false
+            },
+            {
+              "id": "colaboradorID",
+              "displayName": "colaboradorID",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": true
+            },
+            {
+              "id": "resumo",
+              "displayName": "resumo",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": true
+            },
+            {
+              "id": "serviçoid",
+              "displayName": "serviçoid",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": true
+            },
+            {
+              "id": "data_pretendida",
+              "displayName": "data_pretendida",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": true
+            },
+            {
+              "id": "motivo_transferencia",
+              "displayName": "motivo_transferencia",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        }
+      },
+      "type": "@n8n/n8n-nodes-langchain.toolWorkflow",
+      "typeVersion": 2.2,
+      "position": [
+        4576,
+        1280
+      ],
+      "id": "b1ca1456-0ea8-41f6-a76c-f888a4321771",
+      "name": "atendimento_humano"
+    },
+    {
+      "parameters": {
+        "description": "chame essa tool quando o cliente quiser fotos do servico",
+        "workflowId": {
+          "__rl": true,
+          "value": "PKhF5kOXBDNynpEv",
+          "mode": "list",
+          "cachedResultName": "REGRA_NOVA"
+        },
+        "workflowInputs": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "tipo": "fotos",
+            "empresaID": "={{ $('GET EMPRESA').item.json.id }}",
+            "user_id": "={{ $('Encontrar Cliente').item.json.whatsapp_id }}",
+            "telefone": "={{ $('Encontrar Cliente').item.json.telefone }}",
+            "servico_id": "={{ /*n8n-auto-generated-fromAI-override*/ $fromAI('servico_id', `servi_oid - id do serviço, nao invente essa informacao, disponível na tool lista_servicos, e escolhido pelo cliente `, 'number') }}"
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "user_id",
+              "displayName": "user_id",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false
+            },
+            {
+              "id": "agendamento_id",
+              "displayName": "agendamento_id",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": true
+            },
+            {
+              "id": "telefone",
+              "displayName": "telefone",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false
+            },
+            {
+              "id": "email",
+              "displayName": "email",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": true
+            },
+            {
+              "id": "nome",
+              "displayName": "nome",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": true
+            },
+            {
+              "id": "data_inicio",
+              "displayName": "data_inicio",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": true
+            },
+            {
+              "id": "data_fim",
+              "displayName": "data_fim",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": true
+            },
+            {
+              "id": "tipo",
+              "displayName": "tipo",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false
+            },
+            {
+              "id": "empresaID",
+              "displayName": "empresaID",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false
+            },
+            {
+              "id": "colaboradorID",
+              "displayName": "colaboradorID",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "number",
+              "removed": true
+            },
+            {
+              "id": "resumo",
+              "displayName": "resumo",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": true
+            },
+            {
+              "id": "servico_id",
+              "displayName": "servico_id",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "number",
+              "removed": false
+            },
+            {
+              "id": "data_pretendida",
+              "displayName": "data_pretendida",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": true
+            },
+            {
+              "id": "motivo_transferencia",
+              "displayName": "motivo_transferencia",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": true
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        }
+      },
+      "type": "@n8n/n8n-nodes-langchain.toolWorkflow",
+      "typeVersion": 2.2,
+      "position": [
+        4720,
+        1280
+      ],
+      "id": "af7a4111-2522-4b90-956b-6a36ba057d53",
+      "name": "envia_fotos"
+    },
+    {
+      "parameters": {
+        "text": "={{ $('Mensagem').item.json.message }}",
+        "options": {
+          "systemMessage": "=## 1. Missão Essencial do Agente (Prioridade Máxima)\n\n**Objetivo Principal:** Atender solicitações de agendamento, reagendamento, cancelamento e consultas de clientes de forma autônoma e precisa. Tambem verificar se precisa de pix_reserva== {{ $('Mapeia dados pix reserva').item.json.precisa_pix }},\n* se o cliente quiser falar com atendimento humano, chame a tool `atendimento_humano` *\n\n**Regra de Ouro para IDs:**\n*   **NUNCA INVENTE IDs.** Todos os IDs (serviço, colaborador, agendamento, empresa) DEVEM ser obtidos EXCLUSIVAMENTE através das ferramentas fornecidas.\n*   Se um ID for necessário e não estiver disponível ou for inválido, solicite-o ao cliente de forma clara ou use a ferramenta apropriada para obtê-lo.\n\n**Estilo de Comunicação:**\n*   **Curto e Objetivo:** Respostas com no máximo 200 caracteres.\n*   **Amigável e Moderno:** Tom de voz com vibe Gen Z, usando emojis quando apropriado.\n*   **Personalizado:** Use o nome do cliente sempre que possível.\n*   **Em caso de erro:** Peça desculpas e ofereça alternativas claras (ex: tentar novamente, direcionar para atendimento humano).\n\n**Saudação Inicial (OBRIGATÓRIA):**\n1.  **Primeira Interação:** \"Oi! Bem-vindo(a) à {{ $('GET EMPRESA').item.json.nome_fantasia }} ✨ Eu sou {{ $('GET EMPRESA').item.json['nome_do_assistente'] }}. Te ajudo em que hoje? Como posso te chamar? 😊\"\n2.  **Explicação Rápida:** \"Pra dar tudo certo, vou confirmar serviço, profissional e horário, blz?\"\n3.  **Se cliente já informar serviço/data/hora:** \"Perfeito! Vou só confirmar rapidinho as infos e a disponibilidade, tá?\"\n\n---\n\n## 2. Contexto Operacional\n\n### 2.1. Informações da Empresa e Cliente\n*   **Empresa:**\n    *   Nome: {{ $('GET EMPRESA').item.json.nome_fantasia }}\n    *   ID: {{ $('GET EMPRESA').item.json.id }}\n    *   Endereço: {{ $('GET EMPRESA').item.json.endereco }} - {{ $('GET EMPRESA').item.json.bairro }}, {{ $('GET EMPRESA').item.json.numero }}\n    *   Instagram: {{ $('GET EMPRESA').item.json.instagram }}\n    *   Nicho: {{ $('GET EMPRESA').item.json.nicho }}\n    *   Personalidade Extra: {{ $('GET EMPRESA').item.json.personalidade_extra }}\n    *   Regras Extras: {{ $('GET EMPRESA').item.json.regras_extras }}\n*   **Cliente:**\n    *   Nome: {{ $('Encontrar Cliente').item.json.nome }}\n    *   ID Conversa (user_id): {{ $('Encontrar Cliente').item.json.whatsapp_id }}\n\n### 2.2. Data e Hora Atuais\n*   Hoje é {{ $now.weekdayLong }}, {{ $now.format('dd/MM/yyyy') }} às {{ $now.hour.toString().padStart(2, '0') }}:{{ $now.minute.toString().padStart(2, '0') }} (America/Sao_Paulo)\n*   **Regra:** Trabalhe apenas com datas e horários futuros. Converta expressões como \"amanhã às 10h\" para o formato absoluto `DD/MM/YYYY HH:mm`.\n\n---\n\n## 3. Ferramentas Disponíveis\n\nUse as seguintes ferramentas para interagir com o sistema. **SEMPRE** use os parâmetros exatamente como descritos e **NUNCA** invente valores para eles. Se um parâmetro for obrigatório e você não tiver a informação, peça ao cliente.\n\n1.  **`lista_servicos(empresaID)`**\n    *   **Descrição:** Lista os serviços disponíveis da empresa, seus valores e URLs de imagens.\n    *   **Retorna:** `servi_oid` (ID do serviço), nome do serviço, preço, duração, URL da imagem (se houver).\n    *   **Uso:** Chame quando o cliente perguntar sobre serviços ou quando a intenção de agendamento não especificar um serviço claro.\n    *   **Regra:** NUNCA envie os preços junto com a lista de serviços, a menos que o cliente peça explicitamente.\n\n2.  **`profissionais(empresaID, user_id, servi_oid)`**\n    *   **Descrição:** Lista os profissionais que realizam um `servi_oid` específico para a `empresaID`.\n    *   **Retorna:** `colaboradorID` (ID do profissional), nome do profissional.\n    *   **Uso:** Chame após o cliente escolher um serviço (`servi_oid` válido).\n    *   **Regra:** NUNCA chame esta ferramenta sem um `servi_oid` válido.\n\n3.  **`verificar_disponibilidade(colaboradorID, data_inicio, servi_oid, data_pretendida)`**\n    *   **Descrição:** Verifica os horários disponíveis de um `colaboradorID` para um `servi_oid` em uma `data_inicio` ou `data_pretendida`.\n    *   **Parâmetros de Data:**\n        *   `data_inicio`: Data e hora exata no formato `YYYY-MM-DDTHH:mm:00`.\n        *   `data_pretendida`: Data e hora que o cliente sugeriu, no formato `YYYY-MM-DDTHH:mm:00`.\n    *   **Retorna:** Slots de horários livres.\n    *   **Uso:** Chame antes de `agendar` ou `reagendar` para confirmar a disponibilidade.\n    *   **Regra:** Se o cliente sugerir um horário que não está nos slots retornados, calcule se a duração do serviço cabe naquele horário. Se sim, considere-o disponível. Os slots são apresentados em intervalos de 30 minutos apenas para visualização.\n\n4.  **`agendar(user_id, empresaID, servi_oid, colaboradorID, data_inicio, data_fim, nome, telefone, email)`**\n    *   **Descrição:** Realiza o agendamento de um serviço.\n    *   **Parâmetros de Data:**\n        *   `data_inicio`: Início do agendamento no formato `YYYY-MM-DDTHH:mm:00`.\n        *   `data_fim`: Fim do agendamento no formato `YYYY-MM-DDTHH:mm:00`. Calcule `data_fim` com base na `data_inicio` e `duracao_minutos` do serviço.\n    *   **Uso:** Chame SOMENTE após a confirmação explícita do cliente e com TODOS os IDs e dados necessários. **Se houver PIX Reserva ativo, esta ferramenta SÓ PODE ser chamada APÓS o envio e validação do comprovante de pagamento.**\n\n5.  **`reagendar(agendamento_id, user_id, empresaID, data_inicio, data_fim, colaboradorID, servi_oid, nome, telefone, email)`**\n    *   **Descrição:** Altera a data/hora ou profissional de um agendamento existente.\n    *   **Uso:** Chame SOMENTE após a confirmação explícita do cliente e com TODOS os IDs e dados necessários. **Se houver PIX Reserva ativo, esta ferramenta SÓ PODE ser chamada APÓS o envio e validação do comprovante de pagamento.**\n\n6.  **`cancelar(agendamento_id, user_id, empresaID)`**\n    *   **Descrição:** Cancela um agendamento existente.\n    *   **Uso:** Chame SOMENTE após a confirmação explícita do cliente e com o `agendamento_id` correto.\n\n7.  **`lista_agendamentos(user_id, empresaID)`**\n    *   **Descrição:** Lista os agendamentos futuros do cliente.\n    *   **Retorna:** `agendamento_id` (ID real do agendamento), serviço, profissional, data/hora.\n    *   **Uso:** Chame quando o cliente quiser consultar ou cancelar/reagendar um agendamento.\n    *   **Regra:** Ao listar, mostre o `agendamento_id` real. Se o cliente responder com um número ordinal (ex: \"o segundo\"), você DEVE mapear essa escolha para o `agendamento_id` real correspondente antes de usar a ferramenta `reagendar` ou `cancelar`.\n\n8.  **`lista_valores(empresaID, servi_oid)`**\n    *   **Descrição:** Informa o preço de um serviço específico.\n    *   **Uso:** Chame quando o cliente perguntar sobre o valor de um serviço.\n\n9.  **`envia_fotos(user_id, servico_id(number))` \n\t*   **Descrição:** lista e envia as fotos do serviço solicitado.  \n---\n\n## 4. Fluxos de Trabalho e Regras de Ordem (OBRIGATÓRIO)\n\nSiga estas regras de ordem rigorosamente para evitar erros e garantir um atendimento eficiente:\n\n### 4.1. Agendamento\n1.  **Serviço:**\n    *   Se o cliente não especificar, chame `lista_servicos(empresaID)`. Apresente as opções e **guarde o `servi_oid`** escolhido pelo cliente.\n    *   **Regra:** Se o cliente mencionar múltiplos serviços em uma frase (ex: \"quero cortar o cabelo e fazer a barba\"), peça para ele escolher APENAS UM serviço por vez para agendar.\n2.  **Profissional:**\n    *   Chame `lista_profissionais(empresaID, user_id, servi_oid)` para obter a lista de profissionais que realizam o serviço.\n    *   Se o cliente *informar um profissional específico*, use esse e **guarde o `colaboradorID`**.\n    *   Se o cliente disser \"qualquer um\" ou não tiver preferência, **NÃO liste as opções**. Siga a lógica de seleção automática:\n        1.  Obtenha a data e hora desejadas do cliente. Se faltarem, pergunte: \"Me diz a data (DD/MM) e hora (HH:MM) que você quer?\"\n        2.  Para CADA profissional retornado por `lista_profissionais`, chame `verificar_disponibilidade(colaboradorID, data_inicio, servi_oid)` para o dia/hora desejados.\n        3.  Identifique o slot livre MAIS PRÓXIMO da `data_inicio` desejada (menor diferença absoluta em minutos).\n        4.  **Escolha automaticamente** o profissional com o slot mais próximo. **Guarde o `colaboradorID`** e ajuste a `data_inicio` para o slot real. Calcule `data_fim` com base na duração do serviço.\n        5.  Se nenhum profissional tiver vaga no dia, amplie a busca para os próximos 7 dias e pegue o mais próximo. Se ainda assim não houver, ofereça 3 alternativas de data/hora ou pergunte outra data.\n3.  **Data/Hora:**\n    *   interprete linguagem natural. Converta para data/hora absoluta (fuso horário America/Sao_Paulo) e garanta que seja no futuro.\n    *   Chame `verificar_disponibilidade(colaboradorID, data_inicio, servi_oid)`.\n    *   Se houver horários livres, apresente-os em slots curtos (ex: \"10:00, 10:30, 11:00. Qual prefere?\").\n    *   Se ocupado, sugira horários próximos, outra data ou outro profissional.\n4.  **Confirmação Final:**\n    *   **Antes de chamar `agendar`** VERIFIQUE SEM PRECISA DE PIX RESERVA, SE SIM PEÇA FOTO DO COMPROVANTE E DEPOIS, apresente um resumo completo: \"Confirma [serviço] com [profissional escolhido] em [data] às [hora]? Se preferir, posso trocar o profissional.\"\n    *   Se o cliente confirmar (\"sim\"):\n        * OBRIGATORIAMENTE  **VERIFIQUE PIX RESERVA:** Se `{{ $('Mapeia dados pix reserva').item.json.precisa_pix }}` for `true` (ou equivalente), **NÃO chame `agendar` diretamente**. Siga o **Fluxo de PIX Reserva** (Seção 5).\n        *   Caso contrário (sem PIX Reserva), chame `agendar(...)` com TODOS os IDs e dados.\n    *   **Sucesso (sem PIX):** \"Feito! Te esperamos ✨\"\n    *   **Falha:** \"Ops, rolou um erro técnico 😅 Quer tentar de novo em instantes ou te direciono p/ atendimento humano?\" \n    * se o cliente quiser falar com atendimento humano, chame a tool `atendimento_humano`\n\n### 4.2. Reagendamento\n1.  Chame `lista_agendamentos(user_id, empresaID)`. Liste os agendamentos, mostrando o `agendamento_id` real, serviço, profissional e data/hora.\n2.  Cliente escolhe qual reagendar. **Mapeie a escolha para o `agendamento_id` real**. **Guarde também o `servi_oid` e `colaboradorID` atuais** do agendamento escolhido.\n3.  Solicite a nova data e hora. O cliente pode optar por trocar de profissional.\n4.  Se houver troca de profissional, chame `lista_profissionais` para obter o novo `colaboradorID`.\n5.  Chame `verificar_disponibilidade(colaboradorID, nova_data_inicio, servi_oid)` para o novo horário/profissional.\n6.  **Confirmação Final:** Apresente o resumo do novo horário e peça confirmação explícita.\n7.  Após confirmação (\"sim\"):\n    *   **VERIFIQUE PIX RESERVA:** Se `{{ $('Mapeia dados pix reserva').item.json.precisa_pix }}` for `true` (ou equivalente), **NÃO chame `reagendar` diretamente**. Siga o **Fluxo de PIX Reserva** (Seção 5).\n    *   Caso contrário (sem PIX Reserva), chame `reagendar(...)` com o `agendamento_id` e as novas informações.\n8.  **Sucesso (sem PIX):** Mensagem curta. **Falha:** Desculpas + alternativa.\n\n### 4.3. Cancelamento\n1.  Chame `lista_agendamentos(user_id, empresaID)`. Liste os agendamentos, mostrando o `agendamento_id` real.\n2.  Cliente escolhe qual cancelar. **Mapeie a escolha para o `agendamento_id` real**.\n3.  **Confirmação Final:** \"Tem certeza que quer cancelar [serviço] com [profissional] em [data/hora]?\"\n4.  Após confirmação, chame `cancelar(agendamento_id, user_id, empresaID)`.\n5.  **Sucesso:** Mensagem curta.\n\n### 4.4. Consulta de Agendamentos\n1.  Chame `lista_agendamentos(user_id, empresaID)`. Liste os agendamentos de forma resumida (serviço / profissional / data/hora / `agendamento_id`).\n2.  Ofereça opções: reagendar, cancelar ou fazer um novo agendamento.\n\n### 4.5. Consulta de Valores\n1.  Se o cliente perguntar sobre preços, chame `lista_valores(empresaID, servi_oid)`. Se o `servi_oid` já for conhecido, passe-o. Caso contrário, primeiro chame `lista_servicos` e depois pergunte qual serviço o cliente deseja saber o valor.\n2.  Informe o valor de forma concisa.\n3.  Pergunte se o cliente deseja agendar o serviço.\n\n### 4.6. Envio de Fotos (Obrigatório)\n- Chame a tool `envia_fotos(user_id, servico_id(number))` se o cliente quiser ver fotos do serviço.  \n\n---\n\n## 5. Fluxo de PIX Reserva ({{ $('Mapeia dados pix reserva').item.json.precisa_pix }})\n\n**Quando usar:** SOMENTE se `{{ $('Mapeia dados pix reserva').item.json.precisa_pix }}` indicar que **precisa** (ex.: `true`, `1` ou valor equivalente).\n\n**Fluxo (substitui confirmação direta de agendamento/reagendamento):**\n1.  Após o **resumo** do agendamento/reagendamento e o cliente responder \"sim\":\n    *   Chame `lista_servicos` (ou `lista_valores`, se aplicável) e leia o `preco` correspondente ao `servi_oid`.\n2.  **Cálculo Determinístico do Sinal:**\n    *   Normalize `preco` (ex: \"R$ 1.234,56\" → `1234.56`).\n    *   **Tipo do Sinal:** `{{ $('Mapeia dados pix reserva').item.json.tipo_cobranca }}` (ex: \"percentual\" ou \"fixo\").\n    *   **Valor do Sinal (entrada):** `{{ $('Mapeia dados pix reserva').item.json.valor_cobranca }}`.\n    *   **Se `tipo_cobranca` = \"percentual\"**: `valor_sinal = round(preco * (valor_cobranca / 100), 2)`.\n    *   **Se `tipo_cobranca` = \"fixo\"**: `valor_sinal = round(valor_cobranca, 2)`.\n    *   **Bordas:** Se `valor_sinal <= 0` OU `valor_sinal >= preco`, NÃO informe valor; peça permissão para consultar valores novamente.\n3.  **Mensagem de Cobrança (curta):**\n    *   \"Show! Pra concluir, preciso do **sinal**: **R$ {valor_sinal}**. **Chave PIX**: {{ $('Mapeia dados pix reserva').item.json.chave_pix }}. Me envia o **comprovante** e eu finalizo ✅\"\n4.  **Somente após** receber comprovante (texto indicando pagamento OU mídia imagem/PDF):\n    *   Chame `agendar(...)` OU `reagendar(...)`.\n    *   Confirme: \"Tudo certo! **Agendamento confirmado** 🙌 [data/hora] — Endereço: {{ $('GET EMPRESA').item.json.endereco }}\"\n5.  **Se comprovante for inválido (ilegível, valor incorreto):**\n    *   \"O comprovante não bate com **R$ {valor_sinal}** ou tá ilegível 😅 Pode reenviar certinho?\"\n\n**Regra:** Até a tool retornar sucesso, NÃO use \"agendado/confirmado\"; use **\"pré-reserva pendente\"**.\n\n---\n\n## 6. Tratamento de Erros & Validações\n\n*   **Serviço inválido:** \"Não encontrei esse serviço. Temos: [lista curta]. Qual prefere?\"\n*   **Profissional incompatível/indisponível:** Explique e sugira outro.\n*   **Data passada/formato errado:** \"Me manda no formato DD/MM às HH:MM, por favor?\"\n*   **Indisponível:** Sugira horários próximos ou outro profissional.\n*   **Falha na Ferramenta:** \"Ops, rolou um erro técnico 😅 Quer tentar de novo em instantes ou te direciono p/ atendimento humano?\"\n* se o cliente quiser falar com atendimento humano, chame a tool `atendimento_humano` *\n---\n\n## 7. Formato de Datas para Ferramentas\n\n*   **Entrada do cliente:** \"DD/MM às HH:MM\" ou linguagem natural (amanhã, segunda 10h).\n*   **Conversão:** Converta para data/hora absoluta (fuso horário America/Sao_Paulo) e garanta que seja no futuro.\n*   **Envio às tools:**\n    *   `data_inicio` e `data_fim` como `YYYY-MM-DDTHH:mm:00`.\n    *   `data_fim` = `data_inicio` + duração do serviço (se a duração vier do sistema; se não, confirme com o cliente)."
+        }
+      },
+      "type": "n8n-nodes-better-ai-agent.betterAiAgent",
+      "typeVersion": 16,
+      "position": [
+        3120,
+        528
+      ],
+      "id": "20d3c00f-a276-4315-8257-2e234d594d4f",
+      "name": "Better AI Agent"
+    },
+    {
+      "parameters": {
+        "description": "chame essa tool sempre antes de agendar, para verificar e calcular se precisa de pix reserva para agendar",
+        "workflowId": {
+          "__rl": true,
+          "value": "PKhF5kOXBDNynpEv",
+          "mode": "list",
+          "cachedResultName": "REGRA_NOVA"
+        },
+        "workflowInputs": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "empresaID": "={{ $('GET EMPRESA').item.json.id }}",
+            "tipo": "=pix",
+            "servico_id": "={{ /*n8n-auto-generated-fromAI-override*/ $fromAI('servico_id', `id do serviço - servi_oid(number) - não invente essa informação, servico escolhido pelo cliente, disponível na tool lista_servicos`, 'number') }}"
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "user_id",
+              "displayName": "user_id",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": true
+            },
+            {
+              "id": "agendamento_id",
+              "displayName": "agendamento_id",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": true
+            },
+            {
+              "id": "telefone",
+              "displayName": "telefone",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": true
+            },
+            {
+              "id": "email",
+              "displayName": "email",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": true
+            },
+            {
+              "id": "nome",
+              "displayName": "nome",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": true
+            },
+            {
+              "id": "data_inicio",
+              "displayName": "data_inicio",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": true
+            },
+            {
+              "id": "data_fim",
+              "displayName": "data_fim",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": true
+            },
+            {
+              "id": "tipo",
+              "displayName": "tipo",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string"
+            },
+            {
+              "id": "empresaID",
+              "displayName": "empresaID",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string"
+            },
+            {
+              "id": "colaboradorID",
+              "displayName": "colaboradorID",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "number",
+              "removed": true
+            },
+            {
+              "id": "resumo",
+              "displayName": "resumo",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": true
+            },
+            {
+              "id": "servico_id",
+              "displayName": "servico_id",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "number",
+              "removed": false
+            },
+            {
+              "id": "data_pretendida",
+              "displayName": "data_pretendida",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": true
+            },
+            {
+              "id": "motivo_transferencia",
+              "displayName": "motivo_transferencia",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": true
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        }
+      },
+      "type": "@n8n/n8n-nodes-langchain.toolWorkflow",
+      "typeVersion": 2.2,
+      "position": [
+        4864,
+        1280
+      ],
+      "id": "769b82aa-669d-4c80-95f7-b52ba4dd09d0",
+      "name": "verifica_pix_reserva1"
+    }
+  ],
+  "pinData": {
+    "Webhook": [
+      {
+        "json": {
+          "headers": {
+            "host": "webhook.iaagents.online",
+            "user-agent": "uazapiGO-Webhook/1.0",
+            "content-length": "2728",
+            "accept-encoding": "gzip",
+            "content-type": "application/json",
+            "x-forwarded-for": "187.45.178.254",
+            "x-forwarded-host": "webhook.iaagents.online",
+            "x-forwarded-port": "443",
+            "x-forwarded-proto": "https",
+            "x-forwarded-server": "659ea53f2cb3",
+            "x-real-ip": "187.45.178.254"
+          },
+          "params": {},
+          "query": {},
+          "body": {
+            "BaseUrl": "https://iagenda.uazapi.com",
+            "EventType": "messages",
+            "chat": {
+              "chatbot_agentResetMemoryAt": 0,
+              "chatbot_disableUntil": 0,
+              "chatbot_lastTriggerAt": 0,
+              "chatbot_lastTrigger_id": "",
+              "id": "r8d664d889f918a",
+              "image": "https://pps.whatsapp.net/v/t61.24694-24/473408009_960403712474586_3605141994291234905_n.jpg?ccb=11-4&oh=01_Q5Aa2gEXv-QzPU0665Ocbiem_YvZlF0SPUAFW_fYVjXxgJIE8Q&oe=68D2DCDB&_nc_sid=5e03e0&_nc_cat=101",
+              "imagePreview": "https://pps.whatsapp.net/v/t61.24694-24/473408009_960403712474586_3605141994291234905_n.jpg?stp=dst-jpg_s96x96_tt6&ccb=11-4&oh=01_Q5Aa2gE8LCJArvXAoAV07epi7GXngq9UF1LZwr6JbGjHggosQA&oe=68E00BDB&_nc_sid=5e03e0&_nc_cat=101",
+              "lead_assignedAttendant_id": "",
+              "lead_email": "",
+              "lead_field01": "",
+              "lead_field02": "",
+              "lead_field03": "",
+              "lead_field04": "",
+              "lead_field05": "",
+              "lead_field06": "",
+              "lead_field07": "",
+              "lead_field08": "",
+              "lead_field09": "",
+              "lead_field10": "",
+              "lead_field11": "",
+              "lead_field12": "",
+              "lead_field13": "",
+              "lead_field14": "",
+              "lead_field15": "",
+              "lead_field16": "",
+              "lead_field17": "",
+              "lead_field18": "",
+              "lead_field19": "",
+              "lead_field20": "",
+              "lead_fullName": "",
+              "lead_isTicketOpen": false,
+              "lead_kanbanOrder": 0,
+              "lead_name": "",
+              "lead_notes": "",
+              "lead_personalid": "",
+              "lead_status": "",
+              "lead_tags": [],
+              "name": "Leonardo F.",
+              "owner": "556291215731",
+              "phone": "+55 41 9742-9568",
+              "wa_archived": false,
+              "wa_chatid": "554197429568@s.whatsapp.net",
+              "wa_contactName": "",
+              "wa_ephemeralExpiration": 0,
+              "wa_fastid": "556291215731:554197429568",
+              "wa_isBlocked": false,
+              "wa_isGroup": false,
+              "wa_isGroup_admin": false,
+              "wa_isGroup_announce": false,
+              "wa_isGroup_community": false,
+              "wa_isGroup_member": false,
+              "wa_isPinned": false,
+              "wa_label": [],
+              "wa_lastMessageSender": "554197429568@s.whatsapp.net",
+              "wa_lastMessageTextVote": "tente de novo",
+              "wa_lastMessageType": "ExtendedTextMessage",
+              "wa_lastMsgTimestamp": 1759011091000,
+              "wa_muteEndTime": 0,
+              "wa_name": "Leonardo F.",
+              "wa_unreadCount": 8
+            },
+            "message": {
+              "buttonOrListid": "",
+              "chatid": "554197429568@s.whatsapp.net",
+              "content": {
+                "text": "tente de novo",
+                "contextInfo": {
+                  "expiration": 0,
+                  "ephemeralSettingTimestamp": 0,
+                  "disappearingMode": {
+                    "initiator": 0
+                  }
+                }
+              },
+              "convertOptions": "",
+              "edited": "",
+              "fromMe": false,
+              "groupName": "Unknown",
+              "id": "556291215731:3FBD2A86D86C280D9665",
+              "isGroup": false,
+              "mediaType": "",
+              "messageTimestamp": 1759011091000,
+              "messageType": "ExtendedTextMessage",
+              "messageid": "3FBD2A86D86C280D9665",
+              "owner": "556291215731",
+              "quoted": "",
+              "reaction": "",
+              "sender": "554197429568@s.whatsapp.net",
+              "senderName": "Leonardo F.",
+              "sender_lid": "141704007032880@lid",
+              "sender_pn": "554197429568@s.whatsapp.net",
+              "source": "unknown",
+              "status": "",
+              "text": "tente de novo",
+              "track_id": "",
+              "track_source": "",
+              "type": "text",
+              "vote": "",
+              "wasSentByApi": false
+            },
+            "owner": "556291215731",
+            "token": "15b0fa92-3edc-466d-8473-eb15f556fb4e"
+          },
+          "webhookUrl": "https://webhook.iaagents.online/webhook/agenda-v4-homolog",
+          "executionMode": "production"
+        }
+      }
+    ]
+  },
+  "connections": {
+    "Wait2": {
+      "main": [
+        [
+          {
+            "node": "Loop Over Items",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Separa mensagens": {
+      "main": [
+        [
+          {
+            "node": "Loop Over Items",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Loop Over Items": {
+      "main": [
+        [
+          {
+            "node": "No Operation, do nothing5",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Enviar mensagem",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Enviar mensagem": {
+      "main": [
+        [
+          {
+            "node": "Wait2",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Switch": {
+      "main": [
+        [
+          {
+            "node": "Mensagem Texto3",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Mensagem Texto2",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Trata audio",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Trata Imagem",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Mensagem Erro",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Transcrever Áudio": {
+      "main": [
+        [
+          {
+            "node": "Add Audio Buffer",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "OpenAI": {
+      "main": [
+        [
+          {
+            "node": "Add Imagem Buffer",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Wait": {
+      "main": [
+        [
+          {
+            "node": "Buffer 4",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "ComparandoMensagens": {
+      "main": [
+        [
+          {
+            "node": "Apagar Buffer",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "No Operation, do nothing",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Buffer 1": {
+      "main": [
+        [
+          {
+            "node": "Wait",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Buffer 4": {
+      "main": [
+        [
+          {
+            "node": "ComparandoMensagens",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Add Texto Buffer": {
+      "main": [
+        [
+          {
+            "node": "Buffer 1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Apagar Buffer": {
+      "main": [
+        [
+          {
+            "node": "Mensagem",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Filtro Inicial": {
+      "main": [
+        [
+          {
+            "node": "Dados Lead",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Mensagem Texto2": {
+      "main": [
+        [
+          {
+            "node": "Add Texto Buffer",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Mensagem Audio": {
+      "main": [
+        [
+          {
+            "node": "Convert to File1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Mensagem Imagem": {
+      "main": [
+        [
+          {
+            "node": "Convert to File8",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Add Audio Buffer": {
+      "main": [
+        [
+          {
+            "node": "Buffer 1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Add Error Buffer": {
+      "main": [
+        [
+          {
+            "node": "Buffer 1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Mensagem Erro": {
+      "main": [
+        [
+          {
+            "node": "Add Error Buffer",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Add Imagem Buffer": {
+      "main": [
+        [
+          {
+            "node": "Buffer 1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Criar Cliente": {
+      "main": [
+        [
+          {
+            "node": "Encontrar Cliente",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Convert to File1": {
+      "main": [
+        [
+          {
+            "node": "Transcrever Áudio",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Convert to File8": {
+      "main": [
+        [
+          {
+            "node": "OpenAI",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Mensagem Texto3": {
+      "main": [
+        [
+          {
+            "node": "Add Texto Buffer",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Mensagem": {
+      "main": [
+        [
+          {
+            "node": "Better AI Agent",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "OpenAI Chat Model": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "Better AI Agent",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Think1": {
+      "ai_tool": [
+        [
+          {
+            "node": "Better AI Agent",
+            "type": "ai_tool",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "AI Agent1": {
+      "main": [
+        []
+      ]
+    },
+    "lista_valores": {
+      "ai_tool": [
+        [
+          {
+            "node": "Better AI Agent",
+            "type": "ai_tool",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Lista_agendamentos": {
+      "ai_tool": [
+        [
+          {
+            "node": "Better AI Agent",
+            "type": "ai_tool",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "lista_servicos": {
+      "ai_tool": [
+        [
+          {
+            "node": "Better AI Agent",
+            "type": "ai_tool",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "profissionais": {
+      "ai_tool": [
+        [
+          {
+            "node": "Better AI Agent",
+            "type": "ai_tool",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "cancelar": {
+      "ai_tool": [
+        [
+          {
+            "node": "Better AI Agent",
+            "type": "ai_tool",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "reagendar": {
+      "ai_tool": [
+        [
+          {
+            "node": "Better AI Agent",
+            "type": "ai_tool",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "agendar": {
+      "ai_tool": [
+        [
+          {
+            "node": "Better AI Agent",
+            "type": "ai_tool",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "verificar_disponibilidade": {
+      "ai_tool": [
+        [
+          {
+            "node": "Better AI Agent",
+            "type": "ai_tool",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Encontrar Cliente": {
+      "main": [
+        [
+          {
+            "node": "encontrou_cliente?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "encontrou_cliente?": {
+      "main": [
+        [
+          {
+            "node": "IA_pausada?",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Criar Cliente",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IA_pausada?": {
+      "main": [
+        [
+          {
+            "node": "No Operation, do nothing2",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Switch",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Redis": {
+      "main": [
+        [
+          {
+            "node": "Encontrar Cliente",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Mapeia dados pix reserva": {
+      "main": [
+        [
+          {
+            "node": "Redis",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Verifica se tem pix reserva": {
+      "main": [
+        [
+          {
+            "node": "Mapeia dados pix reserva",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "GET EMPRESA": {
+      "main": [
+        [
+          {
+            "node": "Verifica se tem pix reserva",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Dados Lead": {
+      "main": [
+        [
+          {
+            "node": "GET EMPRESA",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "fromMe?": {
+      "main": [
+        [
+          {
+            "node": "Parametros Fluxo",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "desativa_agente",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parametros Fluxo": {
+      "main": [
+        [
+          {
+            "node": "Filtro Inicial",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Webhook": {
+      "main": [
+        [
+          {
+            "node": "fromMe?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Trata Imagem": {
+      "main": [
+        [
+          {
+            "node": "Mensagem Imagem",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Trata audio": {
+      "main": [
+        [
+          {
+            "node": "Mensagem Audio",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Postgres Chat Memory": {
+      "ai_memory": [
+        [
+          {
+            "node": "Better AI Agent",
+            "type": "ai_memory",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "atendimento_humano": {
+      "ai_tool": [
+        [
+          {
+            "node": "Better AI Agent",
+            "type": "ai_tool",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "envia_fotos": {
+      "ai_tool": [
+        [
+          {
+            "node": "Better AI Agent",
+            "type": "ai_tool",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Better AI Agent": {
+      "main": [
+        [
+          {
+            "node": "Separa mensagens",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "verifica_pix_reserva1": {
+      "ai_tool": [
+        [
+          {
+            "node": "Better AI Agent",
+            "type": "ai_tool",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": true,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "versionId": "89fba1bf-42c8-4864-815c-5b79393f38b7",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "0fe2865cf70809dc463efa8486dab3f18e8deb82135b492f97d571f9b33c612a"
+  },
+  "id": "kx64G0eOwYbgCks6",
+  "tags": []
+}

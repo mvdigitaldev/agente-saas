@@ -263,49 +263,72 @@ export class WhatsappService {
         return;
       }
 
-      // PROCESSAMENTO DE IA (ÁUDIO/IMAGEM) ANTES DE SALVAR
+      // PROCESSAMENTO DE MÍDIA (SEGUINDO FLUXO DO N8N)
       // Se for áudio ou imagem e tivermos token da instância e OpenAI configurado
       if ((messageData.type === 'audioMessage' || messageData.type === 'imageMessage') && instance.uazapi_token && this.openai) {
         try {
-          let mediaBuffer: Buffer;
-          
-          // Tentar baixar da URL direta primeiro (mais confiável)
-          if (messageData.mediaUrl) {
-            this.logger.log(`📥 Baixando mídia da URL direta: ${messageData.mediaUrl.substring(0, 50)}...`);
-            mediaBuffer = await this.uazapiService.downloadMediaFromUrl(messageData.mediaUrl);
-          } else {
-            // Fallback: usar endpoint de download por messageId
-            this.logger.log(`📥 Baixando mídia via messageId: ${messageData.messageId}`);
-            mediaBuffer = await this.uazapiService.downloadMedia(messageData.messageId, instance.uazapi_token);
-          }
-
           if (messageData.type === 'audioMessage') {
+            // ÁUDIO: Baixar via /message/download com base64 e transcrever com Whisper
             this.logger.log('🎙️ Processando mensagem de áudio...');
-            // OpenAI Whisper requer classe File ou similar, mas SDK aceita ReadStream ou Buffer com hacks
-            // Vamos usar o método `toFile` do openai helper se disponível, ou criar um objeto file-like
-            const file = await OpenAI.toFile(mediaBuffer, 'audio.ogg', { type: 'audio/ogg' });
-
+            
+            const mediaData = await this.uazapiService.downloadMediaBase64(messageData.messageId, instance.uazapi_token);
+            
+            if (!mediaData?.base64Data) {
+              throw new Error('Não foi possível baixar o áudio');
+            }
+            
+            // Converter base64 para Buffer e criar arquivo
+            const audioBuffer = Buffer.from(mediaData.base64Data, 'base64');
+            const file = await OpenAI.toFile(audioBuffer, 'audio.ogg', { type: 'audio/ogg' });
+            
+            // Transcrever com Whisper (igual ao N8N: language: pt)
             const transcription = await this.openai.audio.transcriptions.create({
-              file: file,
+              file,
               model: 'whisper-1',
-              language: 'pt', // Forçar português conforme solicitado
-              prompt: 'Transcreva o áudio para português.',
+              language: 'pt',
             });
 
             if (transcription.text) {
-              messageData.body = `[Áudio Transcrito]: ${transcription.text}`;
+              messageData.body = transcription.text; // Texto puro da transcrição
               this.logger.log(`✅ Áudio transcrito: "${transcription.text}"`);
+            } else {
+              messageData.body = '[Áudio sem conteúdo detectável]';
             }
+            
           } else if (messageData.type === 'imageMessage') {
+            // IMAGEM: Baixar via /message/download com base64 e analisar com GPT-4o-mini
             this.logger.log('🖼️ Processando mensagem de imagem...');
-            const base64Image = mediaBuffer.toString('base64');
-            const dataUrl = `data:image/jpeg;base64,${base64Image}`; // Assumindo JPEG por simplicidade, ou detectar mime-type
-
-            // Contexto extra se tiver legenda
+            
+            const mediaData = await this.uazapiService.downloadMediaBase64(messageData.messageId, instance.uazapi_token);
+            
+            if (!mediaData?.base64Data) {
+              throw new Error('Não foi possível baixar a imagem');
+            }
+            
+            // Criar data URL para a imagem
+            const mimeType = mediaData.mimetype || 'image/jpeg';
+            const dataUrl = `data:${mimeType};base64,${mediaData.base64Data}`;
+            
+            // Legenda original (caption)
             const caption = messageData.body || '';
-            const prompt = `Descreva esta imagem detalhadamente para que um agente de IA possa entender o contexto.
-            ${caption ? `O usuário também enviou esta legenda: "${caption}"` : ''}
-            Tente capturar o sentimento e o objetivo do usuário.`;
+            
+            // Prompt igual ao N8N
+            const prompt = `#Instruções
+O usuário te enviou uma imagem a qual você deve descrever.
+
+A imagem pode vir acompanhada de uma mensagem de texto (<MensagemUsuario>)
+
+Caso venha, utilize a mensagem anexa como contexto extra, tente capturar o sentimento da mensagem e objetivo pelo qual o usuário esteja enviando esta imagem na conversa.
+
+Crie uma resposta descrevendo as informações enviadas para que estas sejam utilizadas por um agente no futuro.
+
+Lembre-se:
+Este agente apenas terá as informações que você fornecer, portanto repasse toda informação que julgar importante.
+
+#Dados
+<MensagemUsuario>
+${caption}
+</MensagemUsuario>`;
 
             const response = await this.openai.chat.completions.create({
               model: 'gpt-4o-mini',
@@ -314,31 +337,45 @@ export class WhatsappService {
                   role: 'user',
                   content: [
                     { type: 'text', text: prompt },
-                    {
-                      type: 'image_url',
-                      image_url: {
-                        url: dataUrl,
-                      },
-                    },
+                    { type: 'image_url', image_url: { url: dataUrl } },
                   ],
                 },
               ],
               max_tokens: 300,
             });
 
-            const description = response.choices[0]?.message?.content;
-            if (description) {
-              messageData.body = `[Análise de Imagem]: ${description}\n\n[Legenda Original]: ${caption}`;
-              this.logger.log(`✅ Imagem analisada: "${description.substring(0, 50)}..."`);
-            }
+            const description = response.choices[0]?.message?.content || 'Não foi possível analisar a imagem';
+            
+            // Formato igual ao N8N (ContextoImagem)
+            messageData.body = `<ContextoImagem>
+
+  <DetalheImagem>
+${description}
+  </DetalheImagem>
+
+Contexto Extra: O usuário encaminhou a mensagem a seguir junto á imagem.
+  <MensagemUsuario>
+${caption}
+  </MensagemUsuario>
+
+</ContextoImagem>`;
+            
+            this.logger.log(`✅ Imagem analisada: "${description.substring(0, 50)}..."`);
           }
-        } catch (error) {
-          this.logger.error('Erro ao processar mídia com IA:', error);
-          // Não falhar o fluxo, apenas logar. A mensagem original (vazia ou com caption) seguirá.
-          if (!messageData.body) {
-            messageData.body = '[Erro ao processar mídia]';
+        } catch (error: any) {
+          this.logger.error('Erro ao processar mídia com IA:', error.message || error);
+          // Fallback com mensagem de erro
+          if (messageData.type === 'audioMessage') {
+            messageData.body = '[Erro ao transcrever áudio]';
+          } else {
+            const caption = messageData.body || '';
+            messageData.body = `[Erro ao analisar imagem]${caption ? ` Legenda: ${caption}` : ''}`;
           }
         }
+      } else if (messageData.type === 'audioMessage' || messageData.type === 'imageMessage') {
+        // Sem OpenAI configurada - usar placeholder
+        const caption = messageData.body || '';
+        messageData.body = `[Mídia do tipo ${messageData.type} recebida]${caption ? ` Legenda: ${caption}` : ''}`;
       }
 
       // Garantir que body seja sempre string (proteção extra)

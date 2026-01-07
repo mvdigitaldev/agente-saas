@@ -172,6 +172,64 @@ export class UazapiService {
   }
 
   /**
+   * Baixa mídia via /message/download com return_base64: true
+   * Igual ao fluxo do N8N: Trata audio / Trata Imagem
+   * @param messageId ID da mensagem
+   * @param token Token da instância
+   * @returns Objeto com base64Data e mimetype
+   */
+  async downloadMediaBase64(messageId: string, token: string): Promise<{ base64Data: string; mimetype?: string } | null> {
+    try {
+      this.logger.log(`📥 Baixando mídia base64: ${messageId}`);
+
+      const response = await this.axiosInstance.post(
+        '/message/download',
+        {
+          id: messageId,
+          return_base64: true,
+        },
+        {
+          headers: {
+            token,
+            'Content-Type': 'application/json',
+          },
+        },
+      );
+
+      // Resposta esperada: { base64Data: "...", mimetype: "audio/ogg" }
+      if (response.data?.base64Data) {
+        this.logger.log(`✅ Mídia base64 baixada (${response.data.mimetype || 'unknown'})`);
+        return {
+          base64Data: response.data.base64Data,
+          mimetype: response.data.mimetype,
+        };
+      }
+
+      // Alternativa: resposta pode vir como { data: "base64...", mimetype: "..." }
+      if (response.data?.data) {
+        return {
+          base64Data: response.data.data,
+          mimetype: response.data.mimetype,
+        };
+      }
+
+      // Alternativa: resposta pode vir direto como base64 string
+      if (typeof response.data === 'string' && response.data.length > 100) {
+        return { base64Data: response.data };
+      }
+
+      this.logger.warn('Resposta do download não contém base64Data:', JSON.stringify(response.data).substring(0, 200));
+      return null;
+    } catch (error: any) {
+      this.logger.error(`Erro ao baixar mídia base64: ${error.message}`, error.stack);
+      throw new HttpException(
+        `Erro ao baixar mídia base64: ${error.message}`,
+        HttpStatus.INTERNAL_SERVER_ERROR,
+      );
+    }
+  }
+
+  /**
    * Cria uma nova instância no Uazapi
    * Documentação: https://docs.uazapi.com/
    * Endpoint: POST /instance/init
