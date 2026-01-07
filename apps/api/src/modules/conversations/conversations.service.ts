@@ -152,7 +152,7 @@ export class ConversationsService {
     const db = this.supabase.getServiceRoleClient();
 
     // Atualizar conversa para marcar como necessitando intervenção humana
-    const { data: updated } = await db
+    const { data: updated, error } = await db
       .from('conversations')
       .update({
         status: 'pending_human',
@@ -165,6 +165,11 @@ export class ConversationsService {
       .eq('empresa_id', data.empresa_id)
       .select()
       .single();
+
+    if (error) {
+      this.logger.error(`Erro ao solicitar handoff: ${error.message}`);
+      throw error;
+    }
 
     // TODO: Notificar equipe (webhook, email, etc.)
 
@@ -246,7 +251,7 @@ export class ConversationsService {
         updated_at,
         clients:client_id (
           client_id,
-          name,
+          nome,
           whatsapp_number
         )
       `)
@@ -299,7 +304,7 @@ export class ConversationsService {
         updated_at,
         clients:client_id (
           client_id,
-          name,
+          nome,
           whatsapp_number
         )
       `)

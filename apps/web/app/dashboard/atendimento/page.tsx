@@ -28,7 +28,7 @@ import { ScrollArea } from '@/components/ui/scroll-area'
 
 interface Client {
   client_id: string
-  name?: string
+  nome?: string
   whatsapp_number: string
 }
 
@@ -43,7 +43,7 @@ interface Message {
 interface Conversation {
   conversation_id: string
   status: 'active' | 'pending_human' | 'with_human' | 'closed'
-  needs_human: boolean
+  needs_human?: boolean
   human_handoff_reason?: string
   human_handoff_requested_at?: string
   last_message_at: string
@@ -292,7 +292,7 @@ export default function AtendimentoPage() {
                     </div>
                     <div>
                       <div className="font-medium">
-                        {conversation.clients?.name || formatPhone(conversation.clients?.whatsapp_number)}
+                        {conversation.clients?.nome || formatPhone(conversation.clients?.whatsapp_number)}
                       </div>
                       <div className="text-sm text-muted-foreground flex items-center gap-2">
                         <Phone className="h-3 w-3" />
@@ -328,7 +328,7 @@ export default function AtendimentoPage() {
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
               <User className="h-5 w-5" />
-              {selectedConversation?.clients?.name || formatPhone(selectedConversation?.clients?.whatsapp_number || '')}
+              {selectedConversation?.clients?.nome || formatPhone(selectedConversation?.clients?.whatsapp_number || '')}
             </DialogTitle>
             <DialogDescription>
               {formatPhone(selectedConversation?.clients?.whatsapp_number || '')}
