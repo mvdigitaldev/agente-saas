@@ -101,6 +101,48 @@ export class UazapiService {
   }
 
   /**
+   * Baixa mídia de uma mensagem
+   * Endpoint: POST /message/download
+   * @param messageId ID da mensagem
+   * @param token Token da instância
+   * @returns Buffer do arquivo
+   */
+  async downloadMedia(messageId: string, token: string): Promise<Buffer> {
+    try {
+      this.logger.log(`Baixando mídia da mensagem: ${messageId}`);
+
+      const response = await this.axiosInstance.post(
+        '/message/download',
+        {
+          id: messageId,
+          return_base64: false, // Queremos o buffer binário
+        },
+        {
+          headers: {
+            token,
+            'Content-Type': 'application/json',
+          },
+          responseType: 'arraybuffer', // Importante para receber binário
+        },
+      );
+
+      return Buffer.from(response.data);
+    } catch (error: any) {
+      this.logger.error(`Erro ao baixar mídia: ${error.message}`, error.stack);
+      if (error.response) {
+        throw new HttpException(
+          `Erro ao baixar mídia: ${error.response.data?.message || error.message}`,
+          error.response.status || HttpStatus.INTERNAL_SERVER_ERROR,
+        );
+      }
+      throw new HttpException(
+        `Erro ao baixar mídia: ${error.message}`,
+        HttpStatus.INTERNAL_SERVER_ERROR,
+      );
+    }
+  }
+
+  /**
    * Cria uma nova instância no Uazapi
    * Documentação: https://docs.uazapi.com/
    * Endpoint: POST /instance/init
@@ -256,17 +298,17 @@ export class UazapiService {
       if (error.response) {
         const status = error.response.status || HttpStatus.INTERNAL_SERVER_ERROR;
         const errorMessage = error.response.data?.message || error.message || 'Erro desconhecido';
-        
+
         // Tratar erro 500 como possível token inválido (igual ao iAgenda)
         // Se a mensagem contém "Invalid token" ou similar, tratar como 401
-        const isTokenError = 
-          status === 401 || 
+        const isTokenError =
+          status === 401 ||
           status === 500 && (
             errorMessage.toLowerCase().includes('invalid token') ||
             errorMessage.toLowerCase().includes('token') ||
             errorMessage.toLowerCase().includes('unauthorized')
           );
-        
+
         // Log diferenciado para instância não encontrada vs outros erros
         if (status === 404 || isTokenError) {
           this.logger.warn(
@@ -289,7 +331,7 @@ export class UazapiService {
           status,
         );
       }
-      
+
       this.logger.error(`Erro ao verificar status: ${error.message}`, error.stack);
       throw new HttpException(
         `Erro ao verificar status: ${error.message}`,
@@ -322,7 +364,7 @@ export class UazapiService {
       if (error.response) {
         const status = error.response.status || HttpStatus.INTERNAL_SERVER_ERROR;
         const errorMessage = error.response.data?.message || error.message;
-        
+
         // Log diferenciado para instância não encontrada vs outros erros
         if (status === 404 || status === 401) {
           this.logger.warn(
@@ -340,7 +382,7 @@ export class UazapiService {
           status,
         );
       }
-      
+
       this.logger.error(`Erro ao deletar instância: ${error.message}`, error.stack);
       throw new HttpException(
         `Erro ao deletar instância: ${error.message}`,

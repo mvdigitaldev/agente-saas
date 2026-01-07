@@ -4,17 +4,28 @@ import { ConversationsService } from '../conversations/conversations.service';
 import { JobsService } from '../jobs/jobs.service';
 import { UazapiService } from './uazapi.service';
 import { CreateInstanceDto } from './dto/create-instance.dto';
+import OpenAI from 'openai';
+import { ConfigService } from '@nestjs/config';
 
 @Injectable()
 export class WhatsappService {
   private readonly logger = new Logger(WhatsappService.name);
+  private openai: OpenAI;
 
   constructor(
     private supabase: SupabaseService,
     private conversationsService: ConversationsService,
     private jobsService: JobsService,
     private uazapiService: UazapiService,
-  ) { }
+    private configService: ConfigService,
+  ) {
+    const apiKey = this.configService.get<string>('OPENAI_API_KEY');
+    if (apiKey) {
+      this.openai = new OpenAI({ apiKey });
+    } else {
+      this.logger.warn('OPENAI_API_KEY não configurada. Funcionalidades de IA (áudio/imagem) podem falhar.');
+    }
+  }
 
   /**
    * Sanitiza nome para gerar instance_name único
@@ -53,15 +64,15 @@ export class WhatsappService {
     // Formato Uazapi real: { EventType: "messages", message: { ... }, chat: { ... } }
     if (payload.EventType === 'messages' && payload.message) {
       const msg = payload.message;
-      const phone = msg.sender?.replace('@s.whatsapp.net', '').replace('@c.us', '') || 
-                    msg.chatid?.replace('@s.whatsapp.net', '').replace('@c.us', '') || '';
-      
+      const phone = msg.sender?.replace('@s.whatsapp.net', '').replace('@c.us', '') ||
+        msg.chatid?.replace('@s.whatsapp.net', '').replace('@c.us', '') || '';
+
       return {
         messageId: msg.messageid || msg.id || `msg_${Date.now()}`,
         from: phone,
         body: msg.content || msg.text || '',
         senderName: msg.senderName || payload.chat?.name || payload.chat?.wa_name || '',
-        type: payload.EventType,
+        type: msg.messageType || payload.EventType, // Tentar pegar messageType específico (AudioMessage, ImageMessage)
         instanceId: undefined, // Uazapi não envia instance_id no payload, usamos query param
         isFromMe: msg.fromMe === true,
         owner: payload.owner || '',
@@ -72,14 +83,14 @@ export class WhatsappService {
     if (payload.data?.key?.remoteJid) {
       const remoteJid = payload.data.key.remoteJid;
       const phone = remoteJid.replace('@s.whatsapp.net', '').replace('@c.us', '');
-      
+
       return {
         messageId: payload.data.key.id || `msg_${Date.now()}`,
         from: phone,
-        body: payload.data.message?.conversation || 
-              payload.data.message?.extendedTextMessage?.text ||
-              payload.data.message?.imageMessage?.caption ||
-              '',
+        body: payload.data.message?.conversation ||
+          payload.data.message?.extendedTextMessage?.text ||
+          payload.data.message?.imageMessage?.caption ||
+          '',
         senderName: payload.data.pushName || '',
         type: payload.event || 'message',
         instanceId: payload.instance,
@@ -112,14 +123,14 @@ export class WhatsappService {
     try {
       // Extrair dados do payload (suporta múltiplos formatos)
       const messageData = this.extractMessageData(payload);
-      
+
       if (!messageData) {
         this.logger.warn('Payload não reconhecido ou sem dados de mensagem', { payload });
         return; // Não é uma mensagem válida para processar
       }
 
-      // Ignorar mensagens vazias
-      if (!messageData.body || messageData.body.trim() === '') {
+      // Ignorar mensagens vazias (se não for mídia)
+      if ((!messageData.body || messageData.body.trim() === '') && messageData.type === 'message') {
         this.logger.log('Ignorando mensagem vazia');
         return;
       }
@@ -164,6 +175,80 @@ export class WhatsappService {
           from: messageData.from,
         });
         return;
+      }
+
+      // PROCESSAMENTO DE IA (ÁUDIO/IMAGEM) ANTES DE SALVAR
+      // Se for áudio ou imagem e tivermos token da instância e OpenAI configurado
+      if ((messageData.type === 'audioMessage' || messageData.type === 'imageMessage') && instance.uazapi_token && this.openai) {
+        try {
+          // Baixar mídia
+          const mediaBuffer = await this.uazapiService.downloadMedia(messageData.messageId, instance.uazapi_token);
+
+          if (messageData.type === 'audioMessage') {
+            this.logger.log('🎙️ Processando mensagem de áudio...');
+            // OpenAI Whisper requer classe File ou similar, mas SDK aceita ReadStream ou Buffer com hacks
+            // Vamos usar o método `toFile` do openai helper se disponível, ou criar um objeto file-like
+            const file = await OpenAI.toFile(mediaBuffer, 'audio.ogg', { type: 'audio/ogg' });
+
+            const transcription = await this.openai.audio.transcriptions.create({
+              file: file,
+              model: 'whisper-1',
+              language: 'pt', // Forçar português conforme solicitado
+              prompt: 'Transcreva o áudio para português.',
+            });
+
+            if (transcription.text) {
+              messageData.body = `[Áudio Transcrito]: ${transcription.text}`;
+              this.logger.log(`✅ Áudio transcrito: "${transcription.text}"`);
+            }
+          } else if (messageData.type === 'imageMessage') {
+            this.logger.log('🖼️ Processando mensagem de imagem...');
+            const base64Image = mediaBuffer.toString('base64');
+            const dataUrl = `data:image/jpeg;base64,${base64Image}`; // Assumindo JPEG por simplicidade, ou detectar mime-type
+
+            // Contexto extra se tiver legenda
+            const caption = messageData.body || '';
+            const prompt = `Descreva esta imagem detalhadamente para que um agente de IA possa entender o contexto.
+            ${caption ? `O usuário também enviou esta legenda: "${caption}"` : ''}
+            Tente capturar o sentimento e o objetivo do usuário.`;
+
+            const response = await this.openai.chat.completions.create({
+              model: 'gpt-4o-mini',
+              messages: [
+                {
+                  role: 'user',
+                  content: [
+                    { type: 'text', text: prompt },
+                    {
+                      type: 'image_url',
+                      image_url: {
+                        url: dataUrl,
+                      },
+                    },
+                  ],
+                },
+              ],
+              max_tokens: 300,
+            });
+
+            const description = response.choices[0]?.message?.content;
+            if (description) {
+              messageData.body = `[Análise de Imagem]: ${description}\n\n[Legenda Original]: ${caption}`;
+              this.logger.log(`✅ Imagem analisada: "${description.substring(0, 50)}..."`);
+            }
+          }
+        } catch (error) {
+          this.logger.error('Erro ao processar mídia com IA:', error);
+          // Não falhar o fluxo, apenas logar. A mensagem original (vazia ou com caption) seguirá.
+          if (!messageData.body) {
+            messageData.body = '[Erro ao processar mídia]';
+          }
+        }
+      }
+
+      // Se ainda estiver vazio (ex: imagem sem legenda e falha na IA), preencher para não ser descartado
+      if (!messageData.body || messageData.body.trim() === '') {
+        messageData.body = `[Mídia do tipo ${messageData.type} recebida]`;
       }
 
       // 2. Salvar inbound_event

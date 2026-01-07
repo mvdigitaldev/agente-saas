@@ -15,7 +15,7 @@ export class ToolsRegistrationService implements OnModuleInit {
     private readonly paymentTools: PaymentTools,
     private readonly humanTools: HumanTools,
     private readonly mediaTools: MediaTools,
-  ) {}
+  ) { }
 
   onModuleInit() {
     this.registerAllTools();
@@ -158,7 +158,7 @@ export class ToolsRegistrationService implements OnModuleInit {
     this.toolRegistry.registerTool({
       name: 'list_services',
       description:
-        'Listar serviços disponíveis na empresa. Retorna lista com nomes, preços, duração e descrições.',
+        'Listar serviços disponíveis na empresa. Retorna lista com nomes, preços, duração, descrições e image_url para envio de fotos.',
       parameters: {
         type: 'object',
         properties: {

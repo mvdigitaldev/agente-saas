@@ -7,7 +7,7 @@ import { PaymentLinkDto } from './dto/payment-link.dto';
 
 @Injectable()
 export class SchedulingService {
-  constructor(private supabase: SupabaseService) {}
+  constructor(private supabase: SupabaseService) { }
 
   async getAvailableSlots(dto: AvailableSlotsDto) {
     const db = this.supabase.getServiceRoleClient();
@@ -304,7 +304,29 @@ export class SchedulingService {
 
     const { data } = await query.order('nome', { ascending: true });
 
-    return { services: data || [] };
+    // Processar URLs de imagem
+    const servicesWithImages = data?.map(service => {
+      let imageUrl = null;
+      if (service.images && service.images.length > 0) {
+        imageUrl = service.images[0];
+      } else if (service.image_url) {
+        imageUrl = service.image_url;
+      }
+
+      // Se tiver imagem e não for URL completa, gerar URL pública assumindo bucket 'services'
+      // Ajuste conforme o bucket real caso saiba o nome correto
+      if (imageUrl && !imageUrl.startsWith('http')) {
+        const { data: publicUrlData } = db.storage.from('services').getPublicUrl(imageUrl);
+        imageUrl = publicUrlData.publicUrl;
+      }
+
+      return {
+        ...service,
+        image_url: imageUrl // Campo unificado para a IA
+      };
+    }) || [];
+
+    return { services: servicesWithImages };
   }
 
   async checkPaymentStatus(paymentId: string, empresaId: string) {
