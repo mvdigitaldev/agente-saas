@@ -1,42 +1,40 @@
 import { RedisOptions } from 'ioredis';
 
 export function getRedisConnection(): RedisOptions {
-  /**
-   * REDIS_URL (Redis Cloud / Upstash)
-   * Detecta automaticamente se deve usar TLS baseado no protocolo
-   */
   if (process.env.REDIS_URL) {
-    const redisUrl = process.env.REDIS_URL.trim().replace(/^["']|["']$/g, '');
-    const isTls = redisUrl.startsWith('rediss://');
+    const rawUrl = process.env.REDIS_URL.trim().replace(/^["']|["']$/g, '');
+    const isTls = rawUrl.startsWith('rediss://');
 
-    // Parse da URL para extrair componentes
-    const url = new URL(redisUrl);
+    const normalized = isTls
+      ? rawUrl.replace('rediss://', 'redis://')
+      : rawUrl;
+
+    const url = new URL(normalized);
 
     const options: RedisOptions = {
       host: url.hostname,
-      port: parseInt(url.port) || 6379,
+      port: Number(url.port) || (isTls ? 6380 : 6379),
       username: url.username || 'default',
-      password: url.password,
+      password: url.password
+        ? decodeURIComponent(url.password)
+        : undefined,
       maxRetriesPerRequest: null,
       enableReadyCheck: false,
     };
 
-    // Adiciona TLS apenas se a URL começar com rediss://
     if (isTls) {
       options.tls = {
         rejectUnauthorized: false,
+        servername: url.hostname, // 🔥 essencial pro Redis Cloud
       };
     }
 
-    console.log(`🔗 Conectando ao Redis: ${url.hostname}:${url.port} (TLS: ${isTls})`);
+    console.log(
+      `🔗 Redis ${url.hostname}:${options.port} | TLS=${isTls}`,
+    );
 
     return options;
   }
-
-  /**
-   * FALLBACK LOCAL
-   */
-  console.warn('⚠️ Nenhuma configuração Redis encontrada. Usando localhost.');
 
   return {
     host: 'localhost',
