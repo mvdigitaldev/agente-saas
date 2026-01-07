@@ -17,11 +17,13 @@ import { ConversationsModule } from '../conversations/conversations.module';
 import { WhatsappModule } from '../whatsapp/whatsapp.module';
 import { AgentConfigModule } from '../agent-config/agent-config.module';
 import { JobsModule } from '../jobs/jobs.module';
+import { getRedisConnection } from '../../config/redis.config';
 
 @Module({
   imports: [
     BullModule.registerQueue({
       name: 'process-inbound-message',
+      connection: getRedisConnection(),
     }),
     SchedulingModule,
     ConversationsModule,

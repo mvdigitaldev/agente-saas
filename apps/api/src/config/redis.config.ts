@@ -1,23 +1,22 @@
 import { RedisOptions } from 'ioredis';
 
 export function getRedisConnection(): RedisOptions {
+  console.log('🔧 getRedisConnection() chamado');
+  console.log('🔧 REDIS_URL:', process.env.REDIS_URL ? 'DEFINIDA' : 'NÃO DEFINIDA');
+  
   if (process.env.REDIS_URL) {
-    const rawUrl = process.env.REDIS_URL.trim().replace(/^["']|["']$/g, '');
-    const isTls = rawUrl.startsWith('rediss://');
+    const redisUrl = process.env.REDIS_URL.trim().replace(/^["']|["']$/g, '');
+    const isTls = redisUrl.startsWith('rediss://');
 
-    const normalized = isTls
-      ? rawUrl.replace('rediss://', 'redis://')
-      : rawUrl;
+    console.log('🔧 URL começa com rediss://:', isTls);
 
-    const url = new URL(normalized);
+    const url = new URL(redisUrl);
 
     const options: RedisOptions = {
       host: url.hostname,
-      port: Number(url.port) || (isTls ? 6380 : 6379),
+      port: parseInt(url.port) || 6379,
       username: url.username || 'default',
-      password: url.password
-        ? decodeURIComponent(url.password)
-        : undefined,
+      password: url.password,
       maxRetriesPerRequest: null,
       enableReadyCheck: false,
     };
@@ -25,17 +24,21 @@ export function getRedisConnection(): RedisOptions {
     if (isTls) {
       options.tls = {
         rejectUnauthorized: false,
-        servername: url.hostname, // 🔥 essencial pro Redis Cloud
       };
     }
 
-    console.log(
-      `🔗 Redis ${url.hostname}:${options.port} | TLS=${isTls}`,
-    );
+    console.log('🔧 REDIS CONFIG FINAL:', {
+      host: options.host,
+      port: options.port,
+      tls: !!options.tls,
+      username: options.username,
+      passwordLength: options.password?.length || 0,
+    });
 
     return options;
   }
 
+  console.warn('⚠️ REDIS_URL não definida, usando localhost');
   return {
     host: 'localhost',
     port: 6379,
