@@ -3,7 +3,6 @@ import { SupabaseService } from '../../database/supabase.service';
 import { ConversationsService } from '../conversations/conversations.service';
 import { JobsService } from '../jobs/jobs.service';
 import { UazapiService } from './uazapi.service';
-import { UazapiWebhookDto } from './dto/uazapi-webhook.dto';
 import { CreateInstanceDto } from './dto/create-instance.dto';
 
 @Injectable()
@@ -31,11 +30,67 @@ export class WhatsappService {
       .replace(/^-|-$/g, ''); // Remove hífens no início/fim
   }
 
-  async handleInboundMessage(payload: UazapiWebhookDto, instanceIdFromQuery?: string) {
+  /**
+   * Extrai dados relevantes do payload da Uazapi (diferentes formatos)
+   */
+  private extractMessageData(payload: any): {
+    messageId: string;
+    from: string;
+    body: string;
+    senderName: string;
+    type: string;
+    instanceId?: string;
+  } | null {
+    // Formato 1: Uazapi padrão com data.key e data.message
+    if (payload.data?.key?.remoteJid) {
+      const remoteJid = payload.data.key.remoteJid;
+      const phone = remoteJid.replace('@s.whatsapp.net', '').replace('@c.us', '');
+      
+      return {
+        messageId: payload.data.key.id || `msg_${Date.now()}`,
+        from: phone,
+        body: payload.data.message?.conversation || 
+              payload.data.message?.extendedTextMessage?.text ||
+              payload.data.message?.imageMessage?.caption ||
+              payload.data.message?.videoMessage?.caption ||
+              '',
+        senderName: payload.data.pushName || '',
+        type: payload.event || 'message',
+        instanceId: payload.instance,
+      };
+    }
+
+    // Formato 2: Payload direto com from/body
+    if (payload.from) {
+      return {
+        messageId: payload.id || payload.messageId || `msg_${Date.now()}`,
+        from: payload.from.replace('@s.whatsapp.net', '').replace('@c.us', ''),
+        body: payload.body || payload.text || '',
+        senderName: payload.notifyName || payload.senderName || payload.pushName || '',
+        type: payload.type || 'message',
+        instanceId: payload.instance_id,
+      };
+    }
+
+    // Formato não reconhecido
+    return null;
+  }
+
+  async handleInboundMessage(payload: any, instanceIdFromQuery?: string) {
     const db = this.supabase.getServiceRoleClient();
 
     try {
-      // 1. Identificar empresa por instance_id (prioridade: query param > payload > phone_number)
+      // Extrair dados do payload (suporta múltiplos formatos)
+      const messageData = this.extractMessageData(payload);
+      
+      if (!messageData) {
+        this.logger.warn('Payload não reconhecido ou sem dados de mensagem', { payload });
+        return; // Não é uma mensagem, pode ser evento de conexão, ack, etc.
+      }
+
+      this.logger.log('Dados extraídos do webhook:', messageData);
+
+      // 1. Identificar empresa por instance_id (prioridade: query param > payload > messageData)
       let instance = null;
 
       // Tentar por instance_id do query param
@@ -51,12 +106,12 @@ export class WhatsappService {
         }
       }
 
-      // Tentar por instance_id no payload (se Uazapi enviar)
-      if (!instance && payload.instance_id) {
+      // Tentar por instance_id extraído do payload
+      if (!instance && messageData.instanceId) {
         const { data, error } = await db
           .from('whatsapp_instances')
           .select('empresa_id, instance_id, uazapi_instance_id')
-          .eq('uazapi_instance_id', payload.instance_id)
+          .eq('uazapi_instance_id', messageData.instanceId)
           .single();
 
         if (!error && data) {
@@ -65,11 +120,11 @@ export class WhatsappService {
       }
 
       // Fallback: tentar por phone_number (from)
-      if (!instance && payload.from) {
+      if (!instance && messageData.from) {
         const { data, error } = await db
           .from('whatsapp_instances')
           .select('empresa_id, instance_id, uazapi_instance_id')
-          .eq('phone_number', payload.from)
+          .eq('phone_number', messageData.from)
           .single();
 
         if (!error && data) {
@@ -80,8 +135,8 @@ export class WhatsappService {
       if (!instance) {
         this.logger.warn('WhatsApp instance not found', {
           instanceIdFromQuery,
-          payloadFrom: payload.from,
-          payloadInstanceId: payload.instance_id
+          messageFrom: messageData.from,
+          messageInstanceId: messageData.instanceId
         });
         // Não lançar erro para não quebrar o webhook, apenas logar
         return;
@@ -93,7 +148,7 @@ export class WhatsappService {
           empresa_id: instance.empresa_id,
           whatsapp_instance_id: instance.instance_id,
           raw_payload: payload,
-          event_type: payload.type || 'message',
+          event_type: messageData.type || 'message',
           processed: false,
         });
       } catch (error) {
@@ -106,9 +161,9 @@ export class WhatsappService {
           await this.conversationsService.upsertConversationAndMessage({
             empresa_id: instance.empresa_id,
             whatsapp_instance_id: instance.instance_id,
-            whatsapp_number: payload.from,
-            whatsapp_message_id: payload.id || payload.messageId || `inbound_${Date.now()}`,
-            content: payload.body || payload.text || '',
+            whatsapp_number: messageData.from,
+            whatsapp_message_id: messageData.messageId,
+            content: messageData.body,
             direction: 'inbound',
             role: 'user',
           });
@@ -119,14 +174,14 @@ export class WhatsappService {
             empresa_id: instance.empresa_id,
             conversation_id,
             message_id,
-            whatsapp_message_id: payload.id || payload.messageId || `inbound_${Date.now()}`,
+            whatsapp_message_id: messageData.messageId,
             // Novos campos para AgentJob
-            message: payload.body || payload.text || '', // Extrair texto da mensagem
+            message: messageData.body,
             channel: 'whatsapp',
             created_at: new Date().toISOString(),
             metadata: {
-              sender: payload.from,
-              sender_name: payload.notifyName || payload.senderName,
+              sender: messageData.from,
+              sender_name: messageData.senderName,
               is_group: false, // Por enquanto assumindo individual
               raw_payload: payload,
             },

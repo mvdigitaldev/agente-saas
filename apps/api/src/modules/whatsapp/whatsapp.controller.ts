@@ -1,10 +1,10 @@
-import { Controller, Post, Body, Get, Param, Query, HttpCode, HttpStatus, Delete } from '@nestjs/common';
+import { Controller, Post, Body, Get, Param, Query, HttpCode, HttpStatus, Delete, Req } from '@nestjs/common';
 import { WhatsappService } from './whatsapp.service';
 import { UazapiService } from './uazapi.service';
-import { UazapiWebhookDto } from './dto/uazapi-webhook.dto';
 import { SendMessageDto } from './dto/send-message.dto';
 import { CreateInstanceDto } from './dto/create-instance.dto';
 import { SupabaseService } from '../../database/supabase.service';
+import { Request } from 'express';
 
 @Controller('webhook')
 export class WhatsappController {
@@ -16,17 +16,22 @@ export class WhatsappController {
   @Post('uazapi')
   @HttpCode(HttpStatus.OK)
   async handleUazapiWebhook(
-    @Body() payload: UazapiWebhookDto,
+    @Req() req: Request,
     @Query('instance_id') instanceId?: string,
   ) {
-    console.log('📥 Webhook recebido da Uazapi:', {
-      instanceId,
-      payloadKeys: Object.keys(payload),
-      payload: JSON.stringify(payload).substring(0, 500),
-    });
+    // Pegar body raw sem validação do class-validator
+    const payload = req.body;
+
+    // Log TUDO que chegar - incluindo timestamp
+    console.log('═══════════════════════════════════════════════');
+    console.log(`📥 [${new Date().toISOString()}] WEBHOOK RECEBIDO`);
+    console.log('Instance ID (query):', instanceId);
+    console.log('Payload completo:', JSON.stringify(payload, null, 2));
+    console.log('═══════════════════════════════════════════════');
 
     try {
       await this.whatsappService.handleInboundMessage(payload, instanceId);
+      console.log('✅ Webhook processado com sucesso');
       return { success: true };
     } catch (error: any) {
       console.error('❌ Erro no webhook:', error.message, error.stack);

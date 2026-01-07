@@ -1,79 +1,63 @@
-# Mudanças no Deploy - Refatoração BullMQ
+# Mudanças no Deploy - Migração Python para NestJS
 
 ## Resumo das Mudanças
 
-Após a refatoração da arquitetura, **o deploy mudou significativamente**:
+Após a migração completa do agente Python para NestJS, **o deploy mudou significativamente**:
 
-### ❌ ANTES (Errado)
-- **Python Agent**: Background Worker (consumia BullMQ diretamente)
-- **Problema**: Python não conseguia consumir BullMQ corretamente
+### ❌ ANTES
+- **Python Agent**: Web Service (HTTP FastAPI) - serviço separado
+- **Node.js Worker**: Background Worker (consumia BullMQ e chamava Python Agent via HTTP)
+- **Problema**: Arquitetura complexa com múltiplos serviços e chamadas HTTP internas
 
-### ✅ AGORA (Correto)
-- **Python Agent**: Web Service (HTTP FastAPI) - **MUDOU DE TIPO**
-- **Node.js Worker**: Background Worker (consome BullMQ) - **NOVO SERVIÇO**
+### ✅ AGORA
+- **NestJS API**: Web Service com Agent IA integrado - **TUDO EM UM**
+- **AgentProcessor**: Processa jobs do BullMQ diretamente no NestJS
+- **Benefícios**: Menos serviços, menos latência, arquitetura mais simples
 
 ---
 
 ## Mudanças por Serviço
 
-### 1️⃣ Python Agent (`agente-saas-agent`)
+### 1️⃣ NestJS API (`agente-saas-api`)
 
-#### ❌ REMOVER / ❌ MUDAR
-
-**Tipo de serviço:**
-- **ANTES**: `type: worker` (Background Worker)
-- **AGORA**: `type: web` (Web Service HTTP)
-
-**Start Command:**
-- **ANTES**: `python -m app.main`
-- **AGORA**: `uvicorn app.main:app --host 0.0.0.0 --port $PORT`
-
-**Health Check:**
-- **NOVO**: Adicionar `healthCheckPath: /api/health`
+#### ✅ MUDANÇAS
 
 **Variáveis de Ambiente:**
-- ❌ **REMOVER**: `REDIS_URL` (Python não usa Redis mais)
-- ✅ **MANTER**: `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`, `OPENAI_API_KEY`, etc.
+- ✅ **ADICIONAR**: `OPENAI_API_KEY` (obrigatória para o Agent IA)
+- ✅ **ADICIONAR**: `OPENAI_MODEL` (opcional, padrão: `gpt-4.1-mini`)
+
+**Funcionalidades:**
+- ✅ Agora inclui Agent IA integrado
+- ✅ Processa jobs do BullMQ internamente via `AgentProcessor`
+- ✅ Tool calling interno (não precisa chamar endpoints HTTP)
 
 #### ✅ O QUE PERMANECE IGUAL
 
-- Root Directory: `apps/agent`
-- Build Command: `pip install --upgrade pip setuptools wheel && pip install -r requirements.txt`
-- Python Version: `3.11.11`
+- Tipo: `type: web` (Web Service)
+- Root Directory: `apps/api`
+- Build Command: `cd apps/api && npm install && npm run build`
+- Start Command: `cd apps/api && npm run start`
+- Port: `10000`
 
 ---
 
-### 2️⃣ Node.js Worker (`agente-saas-worker`) - **NOVO**
+### 2️⃣ Python Agent (`agente-saas-agent`) - **REMOVIDO**
 
-#### ➕ CRIAR NOVO SERVIÇO
+#### ❌ REMOVER COMPLETAMENTE
 
-**Tipo:** `type: worker` (Background Worker)
-
-**Configuração:**
-- Root Directory: `apps/agent-worker`
-- Build Command: `npm install && npm run build`
-- Start Command: `npm run start`
-
-**Variáveis de Ambiente:**
-- ✅ `REDIS_URL` (obrigatório - para BullMQ)
-- ✅ `AGENT_PYTHON_URL` (obrigatório - URL do serviço Python, ex: `https://agente-saas-agent.onrender.com`)
-
-**Plano Render:**
-- Starter ($7/mês) - Background Workers são mais baratos
+- Serviço removido do Render
+- Não é mais necessário
+- Funcionalidade migrada para NestJS
 
 ---
 
-### 3️⃣ NestJS API (`agente-saas-api`)
+### 3️⃣ Node.js Worker (`agente-saas-worker`) - **REMOVIDO**
 
-#### ✅ NENHUMA MUDANÇA
+#### ❌ REMOVER COMPLETAMENTE
 
-- Tipo: `type: web` (permanece igual)
-- Configurações: Todas permanecem iguais
-- Variáveis: Todas permanecem iguais
-
-**OBSERVAÇÃO IMPORTANTE:**
-- A API **continua produzindo jobs no BullMQ** como antes
-- A única diferença é que agora o **Worker Node.js** consome (não mais o Python)
+- Worker removido do Render
+- Não é mais necessário
+- Processamento agora é feito pelo `AgentProcessor` dentro do NestJS API
 
 ---
 
@@ -81,7 +65,7 @@ Após a refatoração da arquitetura, **o deploy mudou significativamente**:
 
 ```yaml
 services:
-  # Backend NestJS (sem mudanças)
+  # Backend NestJS (com Agent IA integrado)
   - type: web
     name: agente-saas-api
     env: node
@@ -92,187 +76,93 @@ services:
         value: production
       - key: PORT
         value: 10000
-      # ... outras variáveis
-
-  # Python Agent (MUDOU: worker → web)
-  - type: web  # ⚠️ MUDOU DE worker PARA web
-    name: agente-saas-agent
-    env: python
-    rootDir: apps/agent
-    buildCommand: pip install --upgrade pip setuptools wheel && pip install -r requirements.txt
-    startCommand: uvicorn app.main:app --host 0.0.0.0 --port $PORT  # ⚠️ MUDOU
-    healthCheckPath: /api/health  # ⚠️ NOVO
-    envVars:
-      - key: PYTHON_VERSION
-        value: "3.11.11"
-      - key: PORT
-        value: "8000"  # ⚠️ NOVO
       - key: SUPABASE_URL
+        sync: false
+      - key: SUPABASE_ANON_KEY
         sync: false
       - key: SUPABASE_SERVICE_ROLE_KEY
         sync: false
+      - key: REDIS_URL
+        sync: false
+      - key: AGENT_API_KEY
+        sync: false
+      - key: FRONTEND_URL
+        value: https://agente-saas-web.vercel.app
+      - key: WEBHOOK_BASE_URL
+        value: https://agente-saas-api.onrender.com
+      - key: UAZAPI_BASE_URL
+        sync: false
+      - key: UAZAPI_ADMIN_TOKEN
+        sync: false
       - key: OPENAI_API_KEY
         sync: false
-      # ❌ REDIS_URL REMOVIDO
-
-  # Node.js BullMQ Worker (NOVO SERVIÇO)
-  - type: worker  # ⚠️ NOVO
-    name: agente-saas-worker
-    env: node
-    rootDir: apps/agent-worker
-    buildCommand: npm install && npm run build
-    startCommand: npm run start
-    envVars:
-      - key: NODE_ENV
-        value: production
-      - key: REDIS_URL
-        sync: false  # ⚠️ Mesma REDIS_URL da API
-      - key: AGENT_PYTHON_URL
-        value: https://agente-saas-agent.onrender.com  # ⚠️ URL do Python Agent
+      - key: OPENAI_MODEL
+        value: gpt-4.1-mini
 ```
 
 ---
 
 ## Passo a Passo para Atualizar o Deploy no Render
 
-### Passo 1: Atualizar Python Agent (Mudar de Worker para Web Service)
+### Passo 1: Atualizar NestJS API
 
 1. Acesse o Dashboard do Render
-2. Encontre o serviço `agente-saas-agent`
-3. Vá em **Settings** → **Service Details**
-4. **Mudar tipo:**
-   - Se for possível mudar no Dashboard: mude de "Background Worker" para "Web Service"
-   - Se não for possível: **DELETE o serviço antigo** e crie um novo
+2. Encontre o serviço `agente-saas-api`
+3. Vá em **Settings** → **Environment**
+4. **Adicionar variáveis:**
+   - `OPENAI_API_KEY`: Sua chave da OpenAI
+   - `OPENAI_MODEL`: `gpt-4.1-mini` (opcional, mas recomendado)
 
-5. **Atualizar configurações:**
-   - **Start Command**: Mude para `uvicorn app.main:app --host 0.0.0.0 --port $PORT`
-   - **Health Check Path**: Adicione `/api/health`
-   - **Port**: Adicione variável `PORT=8000`
+5. **Salvar e fazer deploy**
 
-6. **Variáveis de Ambiente:**
-   - ❌ **REMOVER**: `REDIS_URL` (se existir)
-   - ✅ **MANTER**: Todas as outras variáveis
+### Passo 2: Remover Serviços Antigos
 
-7. **Salvar e fazer deploy**
+1. No Dashboard do Render:
+   - Encontre `agente-saas-agent` (Python Agent)
+   - Clique em **Settings** → **Delete Service**
+   - Confirme a remoção
 
-### Passo 2: Criar Novo Worker Node.js
-
-1. No Dashboard do Render, clique em **"New"** → **"Background Worker"**
-2. Configure:
-   - **Name**: `agente-saas-worker`
-   - **Environment**: Node
-   - **Root Directory**: `apps/agent-worker`
-   - **Build Command**: `npm install && npm run build`
-   - **Start Command**: `npm run start`
-
-3. **Variáveis de Ambiente:**
-   - `REDIS_URL`: Mesma URL usada pela API NestJS
-   - `AGENT_PYTHON_URL`: URL do Python Agent (ex: `https://agente-saas-agent.onrender.com`)
-
-4. **Salvar e fazer deploy**
+2. Encontre `agente-saas-worker` (Node.js Worker)
+   - Clique em **Settings** → **Delete Service**
+   - Confirme a remoção
 
 ### Passo 3: Verificar Deploy
 
-1. **Python Agent (Web Service):**
-   - ✅ Verificar que está rodando como Web Service
-   - ✅ Testar: `https://agente-saas-agent.onrender.com/api/health`
-   - ✅ Deve retornar: `{"status": "ok", "service": "agent"}`
+1. **NestJS API:**
+   - ✅ Verificar logs - deve mostrar: `AgentModule` carregado
+   - ✅ Verificar que `AgentProcessor` está consumindo fila `process-inbound-message`
+   - ✅ Testar endpoint de health: `https://agente-saas-api.onrender.com/health`
 
-2. **Node.js Worker:**
-   - ✅ Verificar logs - deve mostrar: `🟢 Agent Worker iniciado`
-   - ✅ Verificar que está conectado ao Redis
-   - ✅ Verificar que está consumindo fila `process-inbound-message`
-
-3. **NestJS API:**
-   - ✅ Sem mudanças - deve continuar funcionando normalmente
+2. **Fluxo completo:**
+   - ✅ WhatsApp webhook recebe mensagem
+   - ✅ NestJS enfileira job no BullMQ
+   - ✅ `AgentProcessor` processa job
+   - ✅ Agent IA gera resposta
+   - ✅ Resposta enviada via WhatsApp
 
 ---
 
 ## Variáveis de Ambiente - Resumo
 
-### Python Agent (Web Service)
-
-```bash
-# OBRIGATÓRIAS
-PYTHON_VERSION=3.11.11
-PORT=8000
-SUPABASE_URL=https://...
-SUPABASE_SERVICE_ROLE_KEY=...
-OPENAI_API_KEY=...
-
-# OPCIONAIS
-NEST_API_URL=https://agente-saas-api.onrender.com
-AGENT_API_KEY=...
-LOG_LEVEL=INFO
-
-# ❌ REMOVER (não usa mais)
-# REDIS_URL  <-- REMOVER ESTA
-```
-
-### Node.js Worker (Background Worker)
+### NestJS API (único serviço)
 
 ```bash
 # OBRIGATÓRIAS
 NODE_ENV=production
-REDIS_URL=rediss://...  # Mesma da API NestJS
-AGENT_PYTHON_URL=https://agente-saas-agent.onrender.com  # URL do Python Agent
+PORT=10000
+SUPABASE_URL=https://...
+SUPABASE_SERVICE_ROLE_KEY=...
+REDIS_URL=rediss://...
+OPENAI_API_KEY=...
+
+# OPCIONAIS
+OPENAI_MODEL=gpt-4.1-mini  # Padrão: gpt-4.1-mini
+AGENT_API_KEY=...           # Se usar autenticação
+FRONTEND_URL=https://...
+WEBHOOK_BASE_URL=https://...
+UAZAPI_BASE_URL=...
+UAZAPI_ADMIN_TOKEN=...
 ```
-
-### NestJS API (sem mudanças)
-
-```bash
-# Todas permanecem iguais
-# REDIS_URL continua sendo usada para BullMQ (produz jobs)
-```
-
----
-
-## Fluxo de Deploy Final
-
-```
-1. Render detecta push para main
-   ↓
-2. Build Python Agent (FastAPI) → Web Service
-   ↓
-3. Build Node.js Worker (BullMQ) → Background Worker
-   ↓
-4. Build NestJS API → Web Service
-   ↓
-5. Todos os serviços rodando:
-   - Python Agent (HTTP): https://agente-saas-agent.onrender.com
-   - Node Worker (Background): Consome BullMQ
-   - NestJS API (HTTP): https://agente-saas-api.onrender.com
-```
-
----
-
-## Checklist de Deploy
-
-### Python Agent (Mudar para Web Service)
-
-- [ ] Mudar tipo de serviço: `worker` → `web`
-- [ ] Atualizar Start Command: `uvicorn app.main:app --host 0.0.0.0 --port $PORT`
-- [ ] Adicionar Health Check: `/api/health`
-- [ ] Adicionar variável `PORT=8000`
-- [ ] **REMOVER** variável `REDIS_URL`
-- [ ] Fazer deploy e testar: `https://agente-saas-agent.onrender.com/api/health`
-
-### Node.js Worker (Criar Novo)
-
-- [ ] Criar novo Background Worker
-- [ ] Configurar Root Directory: `apps/agent-worker`
-- [ ] Configurar Build Command: `npm install && npm run build`
-- [ ] Configurar Start Command: `npm run start`
-- [ ] Adicionar variável `REDIS_URL` (mesma da API)
-- [ ] Adicionar variável `AGENT_PYTHON_URL` (URL do Python Agent)
-- [ ] Fazer deploy e verificar logs
-
-### Verificações Finais
-
-- [ ] Python Agent responde em `/api/health`
-- [ ] Node.js Worker está rodando e conectado ao Redis
-- [ ] Node.js Worker consome fila `process-inbound-message`
-- [ ] Fluxo completo funciona: API → BullMQ → Worker → Python
 
 ---
 
@@ -280,52 +170,43 @@ AGENT_PYTHON_URL=https://agente-saas-agent.onrender.com  # URL do Python Agent
 
 ### Antes
 - NestJS API: $7/mês (Web Service)
-- Python Worker: $7/mês (Background Worker)
-- **Total: $14/mês**
-
-### Agora
-- NestJS API: $7/mês (Web Service)
-- Python Agent: $7/mês (Web Service) - **mudou de worker para web**
-- Node.js Worker: $7/mês (Background Worker) - **novo**
+- Python Agent: $7/mês (Web Service)
+- Node.js Worker: $7/mês (Background Worker)
 - **Total: $21/mês**
 
-**Aumento:** +$7/mês (um novo serviço)
+### Agora
+- NestJS API: $7/mês (Web Service) - **único serviço**
+- **Total: $7/mês**
+
+**Economia:** -$14/mês (66% de redução)
 
 ---
 
 ## Troubleshooting
 
-### Python Agent não inicia
+### Agent não processa mensagens
 
-- Verificar que Start Command está correto: `uvicorn app.main:app --host 0.0.0.0 --port $PORT`
-- Verificar variável `PORT` está configurada
-- Verificar logs para erros de importação
+- Verificar `OPENAI_API_KEY` está configurada
+- Verificar logs do `AgentProcessor`
+- Verificar que fila `process-inbound-message` está configurada no BullMQ
 
-### Node.js Worker não conecta ao Redis
+### Erro ao chamar OpenAI
 
-- Verificar `REDIS_URL` está correta (mesma da API)
-- Verificar formato: `rediss://...` para Upstash
-- Verificar logs de conexão Redis
+- Verificar `OPENAI_API_KEY` é válida
+- Verificar créditos da conta OpenAI
+- Verificar logs para erros específicos da API
 
-### Node.js Worker não consome jobs
+### Tools não funcionam
 
-- Verificar nome da fila: `process-inbound-message`
-- Verificar que API está produzindo jobs
-- Verificar logs do worker
-
-### Worker não consegue chamar Python
-
-- Verificar `AGENT_PYTHON_URL` está correta
-- Verificar que Python Agent está rodando (Web Service)
-- Testar manualmente: `curl https://agente-saas-agent.onrender.com/api/health`
+- Verificar que `SchedulingModule`, `ConversationsModule`, `WhatsappModule` estão importados no `AgentModule`
+- Verificar logs de execução de tools no `ToolExecutorService`
 
 ---
 
 ## Notas Importantes
 
-1. **Python não é mais Background Worker**: Agora é Web Service HTTP (FastAPI)
-2. **Worker Node.js é novo**: Precisa ser criado do zero
-3. **REDIS_URL removido do Python**: Python não conhece Redis mais
-4. **AGENT_PYTHON_URL obrigatória**: Worker precisa saber onde está o Python
-5. **Custos aumentam**: +$7/mês por causa do novo worker
-
+1. **Python completamente removido**: Não há mais dependências Python
+2. **Worker integrado**: `AgentProcessor` roda na mesma instância do NestJS
+3. **Chamadas internas**: Tools são executadas via serviços NestJS, não HTTP
+4. **Custos reduzidos**: De 3 serviços para 1 serviço
+5. **Arquitetura simplificada**: Menos pontos de falha, mais fácil de debugar
