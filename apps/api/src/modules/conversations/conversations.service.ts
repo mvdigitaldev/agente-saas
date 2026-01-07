@@ -1,6 +1,8 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { SupabaseService } from '../../database/supabase.service';
 
+export type ConversationStatus = 'active' | 'closed' | 'pending_human' | 'with_human';
+
 @Injectable()
 export class ConversationsService {
   private readonly logger = new Logger(ConversationsService.name);
@@ -153,6 +155,7 @@ export class ConversationsService {
     const { data: updated } = await db
       .from('conversations')
       .update({
+        status: 'pending_human',
         needs_human: true,
         human_handoff_reason: data.reason || null,
         human_handoff_requested_at: new Date().toISOString(),
@@ -169,7 +172,224 @@ export class ConversationsService {
       success: true,
       conversation_id: updated.conversation_id,
       needs_human: updated.needs_human,
+      status: updated.status,
     };
+  }
+
+  /**
+   * Atualiza o status de uma conversation
+   */
+  async updateConversationStatus(
+    conversationId: string,
+    empresaId: string,
+    status: ConversationStatus,
+  ): Promise<any> {
+    const db = this.supabase.getServiceRoleClient();
+
+    const updateData: any = {
+      status,
+      updated_at: new Date().toISOString(),
+    };
+
+    // Se mudou de pending_human para outro status, limpar campos de handoff
+    if (status === 'active' || status === 'closed') {
+      updateData.needs_human = false;
+      updateData.human_handoff_reason = null;
+    }
+
+    // Se mudou para with_human, marcar quando começou o atendimento
+    if (status === 'with_human') {
+      updateData.human_started_at = new Date().toISOString();
+    }
+
+    const { data, error } = await db
+      .from('conversations')
+      .update(updateData)
+      .eq('conversation_id', conversationId)
+      .eq('empresa_id', empresaId)
+      .select()
+      .single();
+
+    if (error) {
+      this.logger.error(`Erro ao atualizar status da conversation: ${error.message}`);
+      throw error;
+    }
+
+    this.logger.log(`Conversation ${conversationId} atualizada para status: ${status}`);
+    return data;
+  }
+
+  /**
+   * Lista todas as conversations de uma empresa
+   */
+  async listConversations(
+    empresaId: string,
+    filters?: {
+      status?: ConversationStatus;
+      needsHuman?: boolean;
+      limit?: number;
+      offset?: number;
+    },
+  ) {
+    const db = this.supabase.getServiceRoleClient();
+
+    let query = db
+      .from('conversations')
+      .select(`
+        conversation_id,
+        status,
+        needs_human,
+        human_handoff_reason,
+        human_handoff_requested_at,
+        last_message_at,
+        created_at,
+        updated_at,
+        clients:client_id (
+          client_id,
+          name,
+          whatsapp_number
+        )
+      `)
+      .eq('empresa_id', empresaId)
+      .order('last_message_at', { ascending: false });
+
+    if (filters?.status) {
+      query = query.eq('status', filters.status);
+    }
+
+    if (filters?.needsHuman !== undefined) {
+      query = query.eq('needs_human', filters.needsHuman);
+    }
+
+    if (filters?.limit) {
+      query = query.limit(filters.limit);
+    }
+
+    if (filters?.offset) {
+      query = query.range(filters.offset, filters.offset + (filters.limit || 10) - 1);
+    }
+
+    const { data, error } = await query;
+
+    if (error) {
+      this.logger.error(`Erro ao listar conversations: ${error.message}`);
+      throw error;
+    }
+
+    return data || [];
+  }
+
+  /**
+   * Busca uma conversation por ID com mensagens recentes
+   */
+  async getConversationWithMessages(conversationId: string, empresaId: string) {
+    const db = this.supabase.getServiceRoleClient();
+
+    // Buscar conversation
+    const { data: conversation, error: convError } = await db
+      .from('conversations')
+      .select(`
+        conversation_id,
+        status,
+        needs_human,
+        human_handoff_reason,
+        human_handoff_requested_at,
+        last_message_at,
+        created_at,
+        updated_at,
+        clients:client_id (
+          client_id,
+          name,
+          whatsapp_number
+        )
+      `)
+      .eq('conversation_id', conversationId)
+      .eq('empresa_id', empresaId)
+      .single();
+
+    if (convError) {
+      this.logger.error(`Erro ao buscar conversation: ${convError.message}`);
+      return null;
+    }
+
+    // Buscar últimas mensagens
+    const { data: messages, error: msgError } = await db
+      .from('messages')
+      .select('message_id, role, content, direction, created_at')
+      .eq('conversation_id', conversationId)
+      .order('created_at', { ascending: true })
+      .limit(50);
+
+    if (msgError) {
+      this.logger.error(`Erro ao buscar messages: ${msgError.message}`);
+    }
+
+    return {
+      ...conversation,
+      messages: messages || [],
+    };
+  }
+
+  /**
+   * Fecha conversations inativas (sem mensagens há X horas)
+   */
+  async closeInactiveConversations(empresaId: string, hoursInactive: number = 24): Promise<number> {
+    const db = this.supabase.getServiceRoleClient();
+    const cutoffDate = new Date(Date.now() - hoursInactive * 60 * 60 * 1000).toISOString();
+
+    const { data, error } = await db
+      .from('conversations')
+      .update({
+        status: 'closed',
+        updated_at: new Date().toISOString(),
+      })
+      .eq('empresa_id', empresaId)
+      .eq('status', 'active')
+      .lt('last_message_at', cutoffDate)
+      .select('conversation_id');
+
+    if (error) {
+      this.logger.error(`Erro ao fechar conversations inativas: ${error.message}`);
+      return 0;
+    }
+
+    const count = data?.length || 0;
+    if (count > 0) {
+      this.logger.log(`${count} conversations fechadas por inatividade`);
+    }
+    return count;
+  }
+
+  /**
+   * Conta conversations por status
+   */
+  async countByStatus(empresaId: string) {
+    const db = this.supabase.getServiceRoleClient();
+
+    const { data, error } = await db
+      .from('conversations')
+      .select('status')
+      .eq('empresa_id', empresaId);
+
+    if (error) {
+      this.logger.error(`Erro ao contar conversations: ${error.message}`);
+      return { active: 0, pending_human: 0, with_human: 0, closed: 0 };
+    }
+
+    const counts = {
+      active: 0,
+      pending_human: 0,
+      with_human: 0,
+      closed: 0,
+    };
+
+    data?.forEach((conv) => {
+      if (counts[conv.status as keyof typeof counts] !== undefined) {
+        counts[conv.status as keyof typeof counts]++;
+      }
+    });
+
+    return counts;
   }
 }
 

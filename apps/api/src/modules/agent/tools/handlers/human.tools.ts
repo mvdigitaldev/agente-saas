@@ -7,11 +7,22 @@ export class HumanTools {
   constructor(private readonly conversationsService: ConversationsService) {}
 
   async requestHumanHandoff(args: any, context: ToolContext) {
-    return this.conversationsService.requestHumanHandoff({
+    const { reason } = args;
+
+    // Usar o método requestHumanHandoff que já atualiza status para pending_human
+    const result = await this.conversationsService.requestHumanHandoff({
       empresa_id: context.empresa_id,
       conversation_id: context.conversation_id,
-      reason: args.reason,
+      reason,
     });
+
+    return {
+      success: result.success,
+      message: 'Solicitação de atendimento humano registrada. Um atendente entrará em contato em breve.',
+      reason,
+      conversation_id: context.conversation_id,
+      status: result.status,
+    };
   }
 }
 

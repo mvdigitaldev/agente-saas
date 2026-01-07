@@ -1,6 +1,8 @@
 import { Module } from '@nestjs/common';
 import { BullModule } from '@nestjs/bullmq';
 import { JobsService } from './jobs.service';
+import { ConversationCleanupJob } from './conversation-cleanup.job';
+import { ConversationsModule } from '../conversations/conversations.module';
 import { getRedisConnection } from '../../config/redis.config';
 
 @Module({
@@ -17,8 +19,9 @@ import { getRedisConnection } from '../../config/redis.config';
       name: 'send-reminders',
       connection: getRedisConnection(),
     }),
+    ConversationsModule,
   ],
-  providers: [JobsService],
+  providers: [JobsService, ConversationCleanupJob],
   exports: [JobsService],
 })
 export class JobsModule {}
