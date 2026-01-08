@@ -70,6 +70,7 @@ import { createServiceSchema, updateServiceSchema, type CreateServiceInput, type
 import { ServiceImageUploader } from "@/components/service-image-uploader";
 import { ImportServicesDialog } from "./ImportServicesDialog";
 import { useToast } from "@/hooks/use-toast";
+import { apiClient } from "@/lib/api-client";
 
 type ViewMode = "grid" | "list";
 
@@ -101,6 +102,7 @@ export function ServicesTab({ empresaId }: ServicesTabProps) {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [serviceImages, setServiceImages] = useState<string[]>([]);
   const [importDialogOpen, setImportDialogOpen] = useState(false);
+  const [staff, setStaff] = useState<any[]>([]);
 
   const form = useForm<CreateServiceInput | UpdateServiceInput>({
     resolver: zodResolver(editingService ? updateServiceSchema : createServiceSchema),
@@ -114,6 +116,7 @@ export function ServicesTab({ empresaId }: ServicesTabProps) {
       available_online: true,
       show_price_online: true,
       fixed_price: true,
+      staff_ids: [],
     },
   });
 
@@ -121,12 +124,12 @@ export function ServicesTab({ empresaId }: ServicesTabProps) {
     if (editingService) {
       // Migrar image_url para images se necessário
       const images = (editingService.images as string[]) || [];
-      const migratedImages = images.length > 0 
-        ? images 
+      const migratedImages = images.length > 0
+        ? images
         : (editingService.image_url ? [editingService.image_url] : []);
-      
+
       setServiceImages(migratedImages);
-      
+
       form.reset({
         nome: editingService.nome,
         descricao: editingService.descricao || "",
@@ -138,6 +141,7 @@ export function ServicesTab({ empresaId }: ServicesTabProps) {
         available_online: editingService.available_online,
         show_price_online: editingService.show_price_online ?? true,
         fixed_price: editingService.fixed_price,
+        staff_ids: editingService.staff_ids || [],
       });
     } else {
       setServiceImages([]);
@@ -152,9 +156,23 @@ export function ServicesTab({ empresaId }: ServicesTabProps) {
         available_online: true,
         show_price_online: true,
         fixed_price: true,
+        staff_ids: [],
       });
     }
   }, [editingService, form]);
+
+  useEffect(() => {
+    const fetchStaff = async () => {
+      if (!empresaId) return;
+      try {
+        const response = await apiClient.get(`/scheduling/staff?empresa_id=${empresaId}`);
+        setStaff(response.data.staff || []);
+      } catch (error) {
+        console.error("Erro ao buscar staff:", error);
+      }
+    };
+    fetchStaff();
+  }, [empresaId]);
 
   const handleOpenDialog = useCallback((service?: Service) => {
     setEditingService(service || null);
@@ -171,7 +189,7 @@ export function ServicesTab({ empresaId }: ServicesTabProps) {
   const onSubmit = useCallback(
     async (data: CreateServiceInput | UpdateServiceInput) => {
       console.log("onSubmit chamado com dados:", data);
-      
+
       if (!empresaId) {
         toast({
           title: "Erro",
@@ -195,6 +213,7 @@ export function ServicesTab({ empresaId }: ServicesTabProps) {
           available_online: true, // Sempre true
           show_price_online: true, // Sempre true
           fixed_price: data.fixed_price ?? true,
+          staff_ids: data.staff_ids || [],
         };
 
         console.log("Payload a ser enviado:", payload);
@@ -545,7 +564,7 @@ export function ServicesTab({ empresaId }: ServicesTabProps) {
                 : "Preencha as informações para criar um novo serviço"}
             </DialogDescription>
           </DialogHeader>
-          <form 
+          <form
             onSubmit={form.handleSubmit(
               onSubmit,
               (errors) => {
@@ -556,7 +575,7 @@ export function ServicesTab({ empresaId }: ServicesTabProps) {
                   variant: "destructive",
                 });
               }
-            )} 
+            )}
             className="space-y-4"
           >
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -639,6 +658,45 @@ export function ServicesTab({ empresaId }: ServicesTabProps) {
                   {form.formState.errors.descricao.message}
                 </p>
               )}
+            </div>
+
+            <div className="space-y-4 py-2 border-t pt-4">
+              <Label className="text-base font-semibold">Colaboradores vinculados</Label>
+              <p className="text-sm text-muted-foreground -mt-2">
+                Selecione os profissionais que realizam este serviço
+              </p>
+              <div className="grid grid-cols-2 gap-4 border rounded-md p-4 bg-muted/20">
+                {staff.map((s) => (
+                  <div key={s.staff_id} className="flex items-center space-x-2">
+                    <Checkbox
+                      id={`staff-${s.staff_id}`}
+                      checked={form.watch("staff_ids")?.includes(s.staff_id)}
+                      onCheckedChange={(checked) => {
+                        const current = form.getValues("staff_ids") || [];
+                        if (checked) {
+                          form.setValue("staff_ids", [...current, s.staff_id]);
+                        } else {
+                          form.setValue(
+                            "staff_ids",
+                            current.filter((id) => id !== s.staff_id)
+                          );
+                        }
+                      }}
+                    />
+                    <Label
+                      htmlFor={`staff-${s.staff_id}`}
+                      className="text-sm font-normal cursor-pointer text-foreground"
+                    >
+                      {s.nome}
+                    </Label>
+                  </div>
+                ))}
+                {staff.length === 0 && (
+                  <p className="text-sm text-muted-foreground col-span-2">
+                    Nenhum colaborador cadastrado. Comece criando um na aba "Colaboradores".
+                  </p>
+                )}
+              </div>
             </div>
 
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -852,11 +910,10 @@ const ServiceTableRow = React.memo(
         <TableCell>{formatarDuracao(service.duracao_minutos)}</TableCell>
         <TableCell>
           <span
-            className={`px-2 py-1 rounded-full text-xs ${
-              service.ativo
-                ? "bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200"
-                : "bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-200"
-            }`}
+            className={`px-2 py-1 rounded-full text-xs ${service.ativo
+              ? "bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200"
+              : "bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-200"
+              }`}
           >
             {service.ativo ? "Ativo" : "Inativo"}
           </span>
@@ -875,9 +932,8 @@ const ServiceTableRow = React.memo(
               </DropdownMenuItem>
               <DropdownMenuItem onClick={onToggleStatus}>
                 <Power
-                  className={`mr-2 h-4 w-4 ${
-                    service.ativo ? "text-muted-foreground" : "text-primary"
-                  }`}
+                  className={`mr-2 h-4 w-4 ${service.ativo ? "text-muted-foreground" : "text-primary"
+                    }`}
                 />
                 {service.ativo ? "Desativar" : "Ativar"}
               </DropdownMenuItem>

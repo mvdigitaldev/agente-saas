@@ -37,6 +37,7 @@ export const createServiceSchema = z.object({
   available_online: z.boolean().optional().default(true),
   show_price_online: z.boolean().optional().default(true),
   fixed_price: z.boolean().optional().default(true),
+  staff_ids: z.array(z.string()).optional().default([]),
 });
 
 /**

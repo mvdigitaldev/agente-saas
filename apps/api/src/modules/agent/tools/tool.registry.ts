@@ -63,8 +63,11 @@ export class ToolRegistry {
       throw new Error(`Tool '${name}' não está habilitada para esta empresa`);
     }
 
+    // Injetar features no contexto
+    const contextWithFeatures = { ...context, features };
+
     // Executar handler
-    return tool.handler(args, context);
+    return tool.handler(args, contextWithFeatures);
   }
 
   listTools(): string[] {

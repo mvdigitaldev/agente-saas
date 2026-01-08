@@ -8,14 +8,14 @@ import { ImportServicesDto } from './dto/import-services.dto';
 export class ServicesService {
   private readonly logger = new Logger(ServicesService.name);
 
-  constructor(private supabase: SupabaseService) {}
+  constructor(private supabase: SupabaseService) { }
 
   async findAll(empresaId: string) {
     const db = this.supabase.getServiceRoleClient();
 
     const { data, error } = await db
       .from('services')
-      .select('*')
+      .select('*, service_staff(staff_id)')
       .eq('empresa_id', empresaId)
       .order('created_at', { ascending: false });
 
@@ -24,7 +24,14 @@ export class ServicesService {
       throw new BadRequestException('Erro ao buscar serviços');
     }
 
-    return { services: data || [] };
+    // Transformar service_staff em staff_ids para facilitar o frontend
+    const services = (data || []).map((service: any) => {
+      const staff_ids = (service.service_staff as any[])?.map((s: any) => s.staff_id) || [];
+      const { service_staff, ...rest } = service;
+      return { ...rest, staff_ids };
+    });
+
+    return { services };
   }
 
   async findOne(empresaId: string, serviceId: string) {
@@ -32,7 +39,7 @@ export class ServicesService {
 
     const { data, error } = await db
       .from('services')
-      .select('*')
+      .select('*, service_staff(staff_id)')
       .eq('service_id', serviceId)
       .eq('empresa_id', empresaId)
       .single();
@@ -41,7 +48,10 @@ export class ServicesService {
       throw new NotFoundException('Serviço não encontrado');
     }
 
-    return data;
+    // Transformar para retornar apenas IDs facilitando o frontend
+    const staff_ids = (data.service_staff as any[])?.map(s => s.staff_id) || [];
+
+    return { ...data, staff_ids };
   }
 
   async create(empresaId: string, createServiceDto: CreateServiceDto) {
@@ -80,6 +90,25 @@ export class ServicesService {
       throw new BadRequestException('Erro ao criar serviço: ' + error.message);
     }
 
+    // Associar colaboradores se fornecidos
+    if (createServiceDto.staff_ids && createServiceDto.staff_ids.length > 0) {
+      const associations = createServiceDto.staff_ids.map(staffId => ({
+        service_id: data.service_id,
+        staff_id: staffId,
+        empresa_id: empresaId
+      }));
+
+      const { error: assocError } = await db
+        .from('service_staff')
+        .insert(associations);
+
+      if (assocError) {
+        this.logger.error('Erro ao associar colaboradores:', assocError);
+        // Não lançaremos erro aqui para não desfazer a criação do serviço, 
+        // mas em produção talvez devêssemos usar transação.
+      }
+    }
+
     return data;
   }
 
@@ -114,6 +143,32 @@ export class ServicesService {
     if (error) {
       this.logger.error('Erro ao atualizar serviço:', error);
       throw new BadRequestException('Erro ao atualizar serviço: ' + error.message);
+    }
+
+    // Sincronizar colaboradores se fornecidos
+    if (updateServiceDto.staff_ids !== undefined) {
+      // Remover associações existentes
+      await db
+        .from('service_staff')
+        .delete()
+        .eq('service_id', serviceId);
+
+      // Adicionar novas se houver
+      if (updateServiceDto.staff_ids && updateServiceDto.staff_ids.length > 0) {
+        const associations = updateServiceDto.staff_ids.map(staffId => ({
+          service_id: serviceId,
+          staff_id: staffId,
+          empresa_id: empresaId
+        }));
+
+        const { error: assocError } = await db
+          .from('service_staff')
+          .insert(associations);
+
+        if (assocError) {
+          this.logger.error('Erro ao sincronizar colaboradores:', assocError);
+        }
+      }
     }
 
     return data;

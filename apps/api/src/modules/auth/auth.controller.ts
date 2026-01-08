@@ -5,7 +5,7 @@ import type { Request } from 'express';
 
 @Controller('auth')
 export class AuthController {
-  constructor(private readonly authService: AuthService) {}
+  constructor(private readonly authService: AuthService) { }
 
   @Post('signup')
   async signup(@Body() dto: SignupDto) {
@@ -22,13 +22,13 @@ export class AuthController {
 
     // Usar o mesmo método do iAgenda: criar cliente a partir do request
     const user = await this.authService.verifyTokenFromRequest(req);
-    
+
     if (!user) {
       throw new UnauthorizedException('Token inválido');
     }
 
     const empresaId = await this.authService.getEmpresaIdByUserId(user.id);
-    
+
     return { empresa_id: empresaId };
   }
 }

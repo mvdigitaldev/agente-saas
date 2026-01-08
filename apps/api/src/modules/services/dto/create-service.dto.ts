@@ -47,4 +47,9 @@ export class CreateServiceDto {
   @IsOptional()
   @IsString()
   created_by?: string;
+
+  @IsOptional()
+  @IsArray()
+  @IsString({ each: true })
+  staff_ids?: string[];
 }

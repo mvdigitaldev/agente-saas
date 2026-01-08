@@ -4,6 +4,7 @@ import { CreateAppointmentDto } from './dto/create-appointment.dto';
 import { CreateBlockedTimeDto } from './dto/create-blocked-time.dto';
 import { AvailableSlotsDto } from './dto/available-slots.dto';
 import { PaymentLinkDto } from './dto/payment-link.dto';
+import { CreateAvailabilityRuleDto } from './dto/create-availability-rule.dto';
 
 @Injectable()
 export class SchedulingService {
@@ -12,30 +13,182 @@ export class SchedulingService {
   async getAvailableSlots(dto: AvailableSlotsDto) {
     const db = this.supabase.getServiceRoleClient();
 
-    // Buscar bloqueios no período
-    const { data: blocks } = await db
-      .from('blocked_times')
-      .select('*')
+    // 1. Buscar duração do serviço e colaboradores associados
+    const { data: service, error: serviceError } = await db
+      .from('services')
+      .select('duracao_minutos, service_staff(staff_id, staff(nome))')
       .eq('empresa_id', dto.empresa_id)
-      .gte('start_time', dto.start_date)
-      .lte('end_time', dto.end_date);
+      .eq('service_id', dto.service_id)
+      .single();
 
-    // Buscar agendamentos no período
-    const { data: appointments } = await db
-      .from('appointments')
-      .select('*')
-      .eq('empresa_id', dto.empresa_id)
-      .gte('start_time', dto.start_date)
-      .lte('end_time', dto.end_date)
-      .in('status', ['scheduled', 'confirmed']);
+    if (serviceError || !service) {
+      throw new BadRequestException('Serviço não encontrado ou sem duração definida');
+    }
 
-    // Calcular slots disponíveis (lógica simplificada)
-    // TODO: Implementar lógica completa de disponibilidade
+    const duration = service.duracao_minutos;
+    const associatedStaff = (service.service_staff as any[]) || [];
+
+    // Se dto.staff_id for fornecido, filtrar apenas esse staff se ele estiver associado ao serviço
+    let staffToProcess = associatedStaff;
+    if (dto.staff_id) {
+      staffToProcess = associatedStaff.filter(s => s.staff_id === dto.staff_id);
+      if (staffToProcess.length === 0) {
+        throw new BadRequestException('O colaborador selecionado não realiza este serviço');
+      }
+    }
+
+    // Se não há colaboradores associados ao serviço, buscar todos os colaboradores ativos da empresa
+    // para verificar se há horários gerais disponíveis
+    if (staffToProcess.length === 0) {
+      const { data: allStaff } = await db
+        .from('staff')
+        .select('staff_id, nome')
+        .eq('empresa_id', dto.empresa_id)
+        .eq('ativo', true);
+      
+      if (!allStaff || allStaff.length === 0) {
+        return { staff_slots: [] };
+      }
+      
+      // Criar lista temporária para processar horários gerais
+      staffToProcess = allStaff.map(s => ({ staff_id: s.staff_id, staff: { nome: s.nome } }));
+    }
+
+    const startDate = new Date(dto.start_date);
+    const endDate = new Date(dto.end_date || dto.start_date);
+
+    const staffResults = [];
+
+    for (const s of staffToProcess) {
+      const staffId = s.staff_id;
+      const staffName = s.staff?.nome || 'Colaborador';
+      const slots = [];
+
+      // Helper para criar data no timezone do Brasil
+      // Os horários no banco são interpretados como horário local do Brasil (UTC-3)
+      // Criamos a data assumindo timezone do Brasil e depois convertemos para UTC para armazenar
+      const createBrasilDate = (dateStr: string, timeStr: string): Date => {
+        // timeStr vem como "09:00:00" ou "09:00"
+        const timeParts = timeStr.split(':');
+        const hours = parseInt(timeParts[0], 10);
+        const minutes = parseInt(timeParts[1] || '0', 10);
+        
+        // Criar string de data/hora no formato ISO sem timezone
+        const dateTimeStr = `${dateStr}T${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}:00`;
+        
+        // Criar data assumindo que é horário do Brasil (UTC-3)
+        // Usamos uma abordagem mais simples: criar a data e ajustar o offset
+        // Primeiro criamos como se fosse UTC, depois ajustamos
+        const tempDate = new Date(`${dateTimeStr}Z`);
+        // Ajustar para o timezone do Brasil: subtrair 3 horas do UTC
+        // Se é 09:00 no Brasil, em UTC seria 12:00, então criamos como 12:00 UTC
+        return new Date(tempDate.getTime() - (3 * 60 * 60 * 1000));
+      };
+
+      // Loop por cada dia no intervalo
+      for (let d = new Date(startDate); d <= endDate; d.setDate(d.getDate() + 1)) {
+        // Obter o dia da semana considerando o timezone do Brasil
+        // Usar a data original e calcular o dia da semana no timezone do Brasil
+        const dateStr = d.toISOString().split('T')[0];
+        // Criar uma data no meio do dia no timezone do Brasil para obter o dia da semana correto
+        const brasilMidday = new Date(`${dateStr}T15:00:00Z`); // 12:00 Brasil = 15:00 UTC
+        const dayOfWeek = brasilMidday.getUTCDay();
+
+        // 2. Buscar regras de disponibilidade para o colaborador
+        // Primeiro tenta buscar regras específicas do colaborador
+        const { data: specificRules } = await db
+          .from('availability_rules')
+          .select('*')
+          .eq('empresa_id', dto.empresa_id)
+          .eq('day_of_week', dayOfWeek)
+          .eq('staff_id', staffId);
+
+        // Se não encontrar regras específicas, busca regras gerais (staff_id NULL)
+        let rules = specificRules;
+        if (!rules || rules.length === 0) {
+          const { data: generalRules } = await db
+            .from('availability_rules')
+            .select('*')
+            .eq('empresa_id', dto.empresa_id)
+            .eq('day_of_week', dayOfWeek)
+            .is('staff_id', null);
+          
+          rules = generalRules;
+        }
+
+        // Se ainda não encontrou regras, pula para o próximo dia
+        if (!rules || rules.length === 0) continue;
+
+        // 3. Buscar appointments e blocked_times do dia para este colaborador
+        // Usar UTC para buscar no banco (que armazena em UTC)
+        const dayStart = `${dateStr}T00:00:00Z`;
+        const dayEnd = `${dateStr}T23:59:59Z`;
+
+        const { data: appointments } = await db
+          .from('appointments')
+          .select('start_time, end_time')
+          .eq('empresa_id', dto.empresa_id)
+          .eq('staff_id', staffId)
+          .gte('start_time', dayStart)
+          .lte('start_time', dayEnd)
+          .in('status', ['scheduled', 'confirmed']);
+
+        const { data: blocks } = await db
+          .from('blocked_times')
+          .select('start_time, end_time')
+          .eq('empresa_id', dto.empresa_id)
+          .eq('staff_id', staffId)
+          .gte('start_time', dayStart)
+          .lte('start_time', dayEnd);
+
+        // 4. Gerar slots para cada regra
+        for (const rule of rules) {
+          // Criar datas no timezone do Brasil
+          let current = createBrasilDate(dateStr, rule.start_time);
+          const ruleEnd = createBrasilDate(dateStr, rule.end_time);
+
+          while (new Date(current.getTime() + duration * 60000) <= ruleEnd) {
+            const slotStart = new Date(current);
+            const slotEnd = new Date(current.getTime() + duration * 60000);
+
+            // Verificar colisão com appointments
+            const hasApptCollision = appointments?.some(appt => {
+              const apptStart = new Date(appt.start_time);
+              const apptEnd = new Date(appt.end_time);
+              return slotStart < apptEnd && slotEnd > apptStart;
+            });
+
+            // Verificar colisão com bloqueios
+            const hasBlockCollision = blocks?.some(block => {
+              const blockStart = new Date(block.start_time);
+              const blockEnd = new Date(block.end_time);
+              return slotStart < blockEnd && slotEnd > blockStart;
+            });
+
+            if (!hasApptCollision && !hasBlockCollision) {
+              slots.push({
+                start: slotStart.toISOString(),
+                end: slotEnd.toISOString(),
+              });
+            }
+
+            const step = 15; // 15 minutos de step
+            current = new Date(current.getTime() + step * 60000);
+          }
+        }
+      }
+
+      if (slots.length > 0) {
+        staffResults.push({
+          staff_id: staffId,
+          staff_name: staffName,
+          slots: slots,
+        });
+      }
+    }
 
     return {
-      available_slots: [],
-      blocked_times: blocks || [],
-      appointments: appointments || [],
+      staff_slots: staffResults,
     };
   }
 
@@ -375,6 +528,201 @@ export class SchedulingService {
       url: paymentLink.url,
       created_at: paymentLink.created_at,
     };
+  }
+
+  async listAvailabilityRules(empresaId: string) {
+    const db = this.supabase.getServiceRoleClient();
+
+    const { data, error } = await db
+      .from('availability_rules')
+      .select('*')
+      .eq('empresa_id', empresaId)
+      .order('day_of_week')
+      .order('start_time');
+
+    if (error) {
+      throw new BadRequestException('Erro ao listar regras de disponibilidade');
+    }
+
+    return data;
+  }
+
+  async createAvailabilityRule(dto: CreateAvailabilityRuleDto) {
+    const db = this.supabase.getServiceRoleClient();
+
+    const { data, error } = await db
+      .from('availability_rules')
+      .insert({
+        empresa_id: dto.empresa_id,
+        day_of_week: dto.day_of_week,
+        start_time: dto.start_time,
+        end_time: dto.end_time,
+        staff_id: dto.staff_id || null,
+      })
+      .select()
+      .single();
+
+    if (error) {
+      console.error('Error creating availability rule:', error);
+      throw new BadRequestException(`Erro ao criar regra de disponibilidade: ${error.message}`);
+    }
+
+    return data;
+  }
+
+  async deleteAvailabilityRule(ruleId: string, empresaId: string) {
+    const db = this.supabase.getServiceRoleClient();
+
+    const { error } = await db
+      .from('availability_rules')
+      .delete()
+      .eq('rule_id', ruleId)
+      .eq('empresa_id', empresaId);
+
+    if (error) {
+      throw new BadRequestException('Erro ao deletar regra de disponibilidade');
+    }
+
+    return { success: true };
+  }
+
+  async createStaff(dto: any) {
+    const db = this.supabase.getServiceRoleClient();
+    const { data, error } = await db
+      .from('staff')
+      .insert({
+        empresa_id: dto.empresa_id,
+        nome: dto.nome,
+        bio: dto.bio,
+        especialidade: dto.especialidade,
+        image_url: dto.image_url,
+        ativo: dto.ativo ?? true,
+      })
+      .select()
+      .single();
+
+    if (error) {
+      throw new BadRequestException('Erro ao criar colaborador: ' + error.message);
+    }
+
+    return data;
+  }
+
+  async deleteStaff(id: string, empresaId: string) {
+    const db = this.supabase.getServiceRoleClient();
+    const { error } = await db
+      .from('staff')
+      .delete()
+      .eq('staff_id', id)
+      .eq('empresa_id', empresaId);
+
+    if (error) {
+      throw new BadRequestException('Erro ao deletar colaborador: ' + error.message);
+    }
+
+    return { success: true };
+  }
+
+  async getStaffServices(staffId: string, empresaId: string) {
+    const db = this.supabase.getServiceRoleClient();
+
+    // Verificar se o colaborador existe e pertence à empresa
+    const { data: staffMember } = await db
+      .from('staff')
+      .select('staff_id')
+      .eq('staff_id', staffId)
+      .eq('empresa_id', empresaId)
+      .single();
+
+    if (!staffMember) {
+      throw new NotFoundException('Colaborador não encontrado');
+    }
+
+    // Buscar serviços associados ao colaborador
+    const { data: serviceStaff, error } = await db
+      .from('service_staff')
+      .select('service_id')
+      .eq('staff_id', staffId)
+      .eq('empresa_id', empresaId);
+
+    if (error) {
+      throw new BadRequestException('Erro ao buscar serviços do colaborador: ' + error.message);
+    }
+
+    const serviceIds = (serviceStaff || []).map((ss: any) => ss.service_id);
+
+    // Buscar todos os serviços da empresa para retornar com flag de associado
+    const { data: allServices } = await db
+      .from('services')
+      .select('service_id, nome, ativo')
+      .eq('empresa_id', empresaId)
+      .order('nome', { ascending: true });
+
+    const services = (allServices || []).map((service: any) => ({
+      service_id: service.service_id,
+      nome: service.nome,
+      ativo: service.ativo,
+      associado: serviceIds.includes(service.service_id),
+    }));
+
+    return { services };
+  }
+
+  async updateStaffServices(staffId: string, empresaId: string, serviceIds: string[]) {
+    const db = this.supabase.getServiceRoleClient();
+
+    // Verificar se o colaborador existe e pertence à empresa
+    const { data: staffMember } = await db
+      .from('staff')
+      .select('staff_id')
+      .eq('staff_id', staffId)
+      .eq('empresa_id', empresaId)
+      .single();
+
+    if (!staffMember) {
+      throw new NotFoundException('Colaborador não encontrado');
+    }
+
+    // Remover todas as associações existentes
+    const { error: deleteError } = await db
+      .from('service_staff')
+      .delete()
+      .eq('staff_id', staffId)
+      .eq('empresa_id', empresaId);
+
+    if (deleteError) {
+      throw new BadRequestException('Erro ao remover associações: ' + deleteError.message);
+    }
+
+    // Adicionar novas associações se houver serviços selecionados
+    if (serviceIds && serviceIds.length > 0) {
+      // Verificar se os serviços pertencem à empresa
+      const { data: validServices } = await db
+        .from('services')
+        .select('service_id')
+        .eq('empresa_id', empresaId)
+        .in('service_id', serviceIds);
+
+      const validServiceIds = (validServices || []).map((s: any) => s.service_id);
+
+      if (validServiceIds.length > 0) {
+        const associations = validServiceIds.map((serviceId: string) => ({
+          service_id: serviceId,
+          staff_id: staffId,
+          empresa_id: empresaId,
+        }));
+
+        const { error: insertError } = await db
+          .from('service_staff')
+          .insert(associations);
+
+        if (insertError) {
+          throw new BadRequestException('Erro ao associar serviços: ' + insertError.message);
+        }
+      }
+    }
+
+    return { success: true, service_ids: serviceIds };
   }
 }
 

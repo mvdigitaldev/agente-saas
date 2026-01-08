@@ -18,6 +18,7 @@ export interface Service {
   ativo: boolean;
   created_at: string;
   updated_at: string;
+  staff_ids?: string[];
 }
 
 interface UseServicesReturn {

@@ -24,9 +24,9 @@ export class ToolsRegistrationService implements OnModuleInit {
   private registerAllTools() {
     // Scheduling tools
     this.toolRegistry.registerTool({
-      name: 'check_available_slots',
+      name: 'get_available_slots',
       description:
-        'Buscar horários disponíveis para agendamento. Retorna slots livres, horários bloqueados e agendamentos existentes no período especificado.',
+        'Buscar horários disponíveis para agendamento. Retorna os slots livres agrupados por colaborador (staff). Se o cliente não tiver preferência, você pode escolher o primeiro horário disponível.',
       parameters: {
         type: 'object',
         properties: {
@@ -41,12 +41,16 @@ export class ToolsRegistrationService implements OnModuleInit {
           },
           service_id: {
             type: 'string',
-            description: 'ID do serviço para filtrar disponibilidade (opcional)',
+            description: 'ID do serviço para filtrar disponibilidade',
+          },
+          staff_id: {
+            type: 'string',
+            description: 'ID do profissional específico para filtrar disponibilidade (opcional)',
           },
         },
-        required: ['start_date', 'end_date'],
+        required: ['start_date', 'service_id'],
       },
-      handler: (args, context) => this.schedulingTools.checkAvailableSlots(args, context),
+      handler: (args, context) => this.schedulingTools.getAvailableSlots(args, context),
     });
 
     this.toolRegistry.registerTool({
@@ -58,6 +62,7 @@ export class ToolsRegistrationService implements OnModuleInit {
         properties: {
           client_id: { type: 'string', description: 'ID do cliente' },
           service_id: { type: 'string', description: 'ID do serviço' },
+          staff_id: { type: 'string', description: 'ID do profissional que realizará o serviço' },
           start_time: {
             type: 'string',
             description: 'Data/hora de início no formato ISO 8601. Exemplo: 2024-01-15T10:00:00Z',
@@ -67,11 +72,10 @@ export class ToolsRegistrationService implements OnModuleInit {
             description:
               'Data/hora de fim no formato ISO 8601. Deve ser posterior a start_time. Exemplo: 2024-01-15T11:00:00Z',
           },
-          staff_id: { type: 'string', description: 'ID do profissional (opcional)' },
           resource_id: { type: 'string', description: 'ID do recurso (opcional)' },
           notes: { type: 'string', description: 'Observações sobre o agendamento (opcional)' },
         },
-        required: ['client_id', 'service_id', 'start_time', 'end_time'],
+        required: ['client_id', 'service_id', 'staff_id', 'start_time', 'end_time'],
       },
       handler: (args, context) => this.schedulingTools.createAppointment(args, context),
     });
@@ -244,6 +248,7 @@ export class ToolsRegistrationService implements OnModuleInit {
       name: 'send_media',
       description:
         'Enviar mídia (fotos, vídeos, documentos) via WhatsApp. Suporta imagens, vídeos e documentos.',
+      requiredFeatures: ['send_media_enabled'],
       parameters: {
         type: 'object',
         properties: {

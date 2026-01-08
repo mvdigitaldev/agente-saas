@@ -13,6 +13,7 @@ import {
   Menu,
   X,
   Headphones,
+  Users,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
@@ -28,7 +29,9 @@ import { cn } from '@/lib/utils'
 
 const menuItems = [
   { href: '/dashboard', label: 'Dashboard', icon: LayoutDashboard },
+  { href: '/dashboard/agenda', label: 'Agenda', icon: Calendar },
   { href: '/dashboard/atendimento', label: 'Atendimento', icon: Headphones },
+  { href: '/dashboard/colaboradores', label: 'Colaboradores', icon: Users },
   { href: '/dashboard/configuracao', label: 'Configuração', icon: Settings },
   { href: '/dashboard/integracao', label: 'Integração', icon: MessageSquare },
   { href: '/dashboard/bloqueios', label: 'Bloqueios', icon: Calendar },

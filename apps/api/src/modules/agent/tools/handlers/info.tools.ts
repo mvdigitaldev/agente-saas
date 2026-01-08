@@ -12,7 +12,18 @@ export class InfoTools {
 
   async listServices(args: any, context: ToolContext) {
     const activeOnly = args.active_only !== undefined ? args.active_only : true;
-    return this.schedulingService.listServices(context.empresa_id, activeOnly);
+    const result = await this.schedulingService.listServices(context.empresa_id, activeOnly);
+
+    // Se o envio de mídia estiver desabilitado, remover URLs de imagens para evitar que o agente as use
+    if (context.features && context.features.send_media_enabled === false && result.services) {
+      result.services = result.services.map((svc: any) => {
+        // Remove image_url e images para garantir
+        const { image_url, images, ...rest } = svc;
+        return rest;
+      });
+    }
+
+    return result;
   }
 
   async listPrices(args: any, context: ToolContext) {

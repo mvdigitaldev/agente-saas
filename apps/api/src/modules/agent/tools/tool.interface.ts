@@ -15,5 +15,6 @@ export interface ToolContext {
   conversation_id: string;
   client_id?: string;
   job_id: string;
+  features?: any;
 }
 

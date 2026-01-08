@@ -9,9 +9,18 @@ export class AvailableSlotsDto {
   service_id?: string;
 
   @IsString()
+  @IsOptional()
+  staff_id?: string;
+
+  @IsString()
+  @IsOptional()
+  resource_id?: string;
+
+  @IsString()
   start_date: string;
 
   @IsString()
-  end_date: string;
+  @IsOptional()
+  end_date?: string;
 }
 

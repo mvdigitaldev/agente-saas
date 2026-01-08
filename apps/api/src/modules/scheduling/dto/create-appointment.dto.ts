@@ -11,8 +11,7 @@ export class CreateAppointmentDto {
   service_id: string;
 
   @IsString()
-  @IsOptional()
-  staff_id?: string;
+  staff_id: string;
 
   @IsString()
   @IsOptional()

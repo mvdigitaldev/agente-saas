@@ -8,6 +8,7 @@ import { Loader2 } from "lucide-react";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { AgentTab } from "./components/AgentTab";
 import { ServicesTab } from "./components/ServicesTab";
+import { AvailabilityTab } from "./components/AvailabilityTab";
 
 export default function ConfiguracaoPage() {
   const [empresaId, setEmpresaId] = useState<string | null>(null);
@@ -95,12 +96,16 @@ export default function ConfiguracaoPage() {
         <TabsList>
           <TabsTrigger value="agente">Agente</TabsTrigger>
           <TabsTrigger value="servicos">Serviços</TabsTrigger>
+          <TabsTrigger value="horarios">Horários</TabsTrigger>
         </TabsList>
         <TabsContent value="agente" className="mt-6">
           <AgentTab empresaId={empresaId} />
         </TabsContent>
         <TabsContent value="servicos" className="mt-6">
           <ServicesTab empresaId={empresaId} />
+        </TabsContent>
+        <TabsContent value="horarios" className="mt-6">
+          <AvailabilityTab empresaId={empresaId} />
         </TabsContent>
       </Tabs>
     </div>
