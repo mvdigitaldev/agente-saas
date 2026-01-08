@@ -39,6 +39,7 @@ export class SchedulingService {
 
     // Se não há colaboradores associados ao serviço, buscar todos os colaboradores ativos da empresa
     // para verificar se há horários gerais disponíveis
+    // Se não houver colaboradores, criar um "staff virtual" para processar regras gerais
     if (staffToProcess.length === 0) {
       const { data: allStaff } = await db
         .from('staff')
@@ -47,64 +48,86 @@ export class SchedulingService {
         .eq('ativo', true);
       
       if (!allStaff || allStaff.length === 0) {
-        return { staff_slots: [] };
+        // Se não há colaboradores, criar um staff virtual para processar regras gerais
+        // Isso permite que serviços sem colaboradores associados ainda possam usar horários gerais
+        staffToProcess = [{ staff_id: null, staff: { nome: 'Todos' } }];
+      } else {
+        // Criar lista temporária para processar horários gerais
+        staffToProcess = allStaff.map(s => ({ staff_id: s.staff_id, staff: { nome: s.nome } }));
       }
-      
-      // Criar lista temporária para processar horários gerais
-      staffToProcess = allStaff.map(s => ({ staff_id: s.staff_id, staff: { nome: s.nome } }));
     }
 
-    const startDate = new Date(dto.start_date);
-    const endDate = new Date(dto.end_date || dto.start_date);
-
     const staffResults = [];
+
+    // Helper para criar data/hora no timezone do Brasil
+    // Os horários no banco são interpretados como horário local do Brasil (UTC-3)
+    // JavaScript Date trabalha em UTC, então 09:00 no Brasil = 12:00 UTC
+    const createBrasilDateTime = (dateStr: string, timeStr: string): Date => {
+      // dateStr vem como "2026-01-09", timeStr vem como "09:00:00" ou "09:00"
+      const timeParts = timeStr.split(':');
+      const hours = parseInt(timeParts[0], 10);
+      const minutes = parseInt(timeParts[1] || '0', 10);
+      
+      // Se o horário é 09:00 no Brasil (UTC-3), em UTC é 12:00 (09:00 + 3h)
+      const utcHours = hours + 3;
+      const utcDateStr = `${dateStr}T${String(utcHours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}:00Z`;
+      return new Date(utcDateStr);
+    };
+
+    // Parse das datas: assumir que "2026-01-09" representa 09/01/2026 no Brasil
+    // Criar data no meio-dia no Brasil (12:00 Brasil = 15:00 UTC) para evitar problemas de timezone
+    const parseDate = (dateStr: string): { dateStr: string; dayOfWeek: number } => {
+      const brasilMidday = new Date(`${dateStr}T15:00:00Z`); // 12:00 Brasil = 15:00 UTC
+      return {
+        dateStr: dateStr,
+        dayOfWeek: brasilMidday.getUTCDay()
+      };
+    };
+
+    // Processar cada dia no intervalo
+    const startDateInfo = parseDate(dto.start_date);
+    const endDateInfo = parseDate(dto.end_date || dto.start_date);
+    
+    // Criar array de datas para processar
+    const datesToProcess: string[] = [];
+    const start = new Date(`${startDateInfo.dateStr}T15:00:00Z`);
+    const end = new Date(`${endDateInfo.dateStr}T15:00:00Z`);
+    const oneDay = 24 * 60 * 60 * 1000;
+    
+    for (let d = start.getTime(); d <= end.getTime(); d += oneDay) {
+      const date = new Date(d);
+      const year = date.getUTCFullYear();
+      const month = String(date.getUTCMonth() + 1).padStart(2, '0');
+      const day = String(date.getUTCDate()).padStart(2, '0');
+      datesToProcess.push(`${year}-${month}-${day}`);
+    }
 
     for (const s of staffToProcess) {
       const staffId = s.staff_id;
       const staffName = s.staff?.nome || 'Colaborador';
       const slots = [];
 
-      // Helper para criar data no timezone do Brasil
-      // Os horários no banco são interpretados como horário local do Brasil (UTC-3)
-      // Criamos a data assumindo timezone do Brasil e depois convertemos para UTC para armazenar
-      const createBrasilDate = (dateStr: string, timeStr: string): Date => {
-        // timeStr vem como "09:00:00" ou "09:00"
-        const timeParts = timeStr.split(':');
-        const hours = parseInt(timeParts[0], 10);
-        const minutes = parseInt(timeParts[1] || '0', 10);
-        
-        // Criar string de data/hora no formato ISO sem timezone
-        const dateTimeStr = `${dateStr}T${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}:00`;
-        
-        // Criar data assumindo que é horário do Brasil (UTC-3)
-        // Usamos uma abordagem mais simples: criar a data e ajustar o offset
-        // Primeiro criamos como se fosse UTC, depois ajustamos
-        const tempDate = new Date(`${dateTimeStr}Z`);
-        // Ajustar para o timezone do Brasil: subtrair 3 horas do UTC
-        // Se é 09:00 no Brasil, em UTC seria 12:00, então criamos como 12:00 UTC
-        return new Date(tempDate.getTime() - (3 * 60 * 60 * 1000));
-      };
-
       // Loop por cada dia no intervalo
-      for (let d = new Date(startDate); d <= endDate; d.setDate(d.getDate() + 1)) {
-        // Obter o dia da semana considerando o timezone do Brasil
-        // Usar a data original e calcular o dia da semana no timezone do Brasil
-        const dateStr = d.toISOString().split('T')[0];
-        // Criar uma data no meio do dia no timezone do Brasil para obter o dia da semana correto
-        const brasilMidday = new Date(`${dateStr}T15:00:00Z`); // 12:00 Brasil = 15:00 UTC
-        const dayOfWeek = brasilMidday.getUTCDay();
+      for (const dateStr of datesToProcess) {
+        const dateInfo = parseDate(dateStr);
+        const dayOfWeek = dateInfo.dayOfWeek;
 
         // 2. Buscar regras de disponibilidade para o colaborador
-        // Primeiro tenta buscar regras específicas do colaborador
-        const { data: specificRules } = await db
-          .from('availability_rules')
-          .select('*')
-          .eq('empresa_id', dto.empresa_id)
-          .eq('day_of_week', dayOfWeek)
-          .eq('staff_id', staffId);
+        let rules = null;
+        
+        if (staffId) {
+          // Primeiro tenta buscar regras específicas do colaborador
+          const { data: specificRules } = await db
+            .from('availability_rules')
+            .select('*')
+            .eq('empresa_id', dto.empresa_id)
+            .eq('day_of_week', dayOfWeek)
+            .eq('staff_id', staffId);
 
-        // Se não encontrar regras específicas, busca regras gerais (staff_id NULL)
-        let rules = specificRules;
+          rules = specificRules;
+        }
+        
+        // Se não encontrar regras específicas (ou se staffId é null), busca regras gerais (staff_id NULL)
         if (!rules || rules.length === 0) {
           const { data: generalRules } = await db
             .from('availability_rules')
@@ -144,8 +167,8 @@ export class SchedulingService {
         // 4. Gerar slots para cada regra
         for (const rule of rules) {
           // Criar datas no timezone do Brasil
-          let current = createBrasilDate(dateStr, rule.start_time);
-          const ruleEnd = createBrasilDate(dateStr, rule.end_time);
+          let current = createBrasilDateTime(dateStr, rule.start_time);
+          const ruleEnd = createBrasilDateTime(dateStr, rule.end_time);
 
           while (new Date(current.getTime() + duration * 60000) <= ruleEnd) {
             const slotStart = new Date(current);

@@ -48,7 +48,7 @@ export class LlmService {
       apiKey,
     });
 
-    this.model = this.configService.get<string>('OPENAI_MODEL') || 'gpt-4.1-mini';
+    this.model = this.configService.get<string>('OPENAI_MODEL') || 'gpt-4o';
     // Não logar a apiKey por segurança
     this.logger.log(`LlmService inicializado com modelo: ${this.model}`);
   }

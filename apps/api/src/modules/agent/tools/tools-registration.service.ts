@@ -26,7 +26,7 @@ export class ToolsRegistrationService implements OnModuleInit {
     this.toolRegistry.registerTool({
       name: 'get_available_slots',
       description:
-        'Buscar horários disponíveis para agendamento. Retorna os slots livres agrupados por colaborador (staff). Se o cliente não tiver preferência, você pode escolher o primeiro horário disponível.',
+        'Buscar horários disponíveis para agendamento. Retorna os slots livres agrupados por colaborador (staff). Os horários retornados estão no formato do Brasil (ex: "09:00", "14:30"). Use os campos start_time e end_time para exibir ao cliente. Se o cliente não tiver preferência, você pode escolher o primeiro horário disponível.',
       parameters: {
         type: 'object',
         properties: {
@@ -162,7 +162,7 @@ export class ToolsRegistrationService implements OnModuleInit {
     this.toolRegistry.registerTool({
       name: 'list_services',
       description:
-        'Listar serviços disponíveis na empresa. Retorna lista com nomes, preços, duração, descrições e image_url. CRÍTICO: Use esta ferramenta ANTES de enviar fotos para obter a URL correta da imagem.',
+        'Listar serviços disponíveis na empresa. Retorna lista com nomes, preços, duração e descrições. Use esta ferramenta para obter informações sobre serviços. NÃO use as URLs de imagens retornadas a menos que o cliente explicitamente solicite fotos.',
       parameters: {
         type: 'object',
         properties: {
