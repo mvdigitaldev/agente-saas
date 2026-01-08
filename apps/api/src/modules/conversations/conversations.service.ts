@@ -9,6 +9,20 @@ export class ConversationsService {
 
   constructor(private supabase: SupabaseService) {}
 
+  /**
+   * Normaliza um número de telefone do WhatsApp removendo sufixos e caracteres não numéricos
+   * Remove: @s.whatsapp.net, @lid.whatsapp.net, @c.us, @lid, etc
+   * Retorna apenas dígitos
+   */
+  private normalizeWhatsAppNumber(phone: string): string {
+    if (!phone) return '';
+    return phone
+      .replace(/@[^.]+\.whatsapp\.net/gi, '') // Remove @s.whatsapp.net, @lid.whatsapp.net, etc
+      .replace(/@c\.us/gi, '') // Remove @c.us
+      .replace(/@[^@]+$/gi, '') // Remove qualquer outro sufixo @xxx (ex: @lid)
+      .replace(/\D/g, ''); // Remove todos os caracteres não numéricos
+  }
+
   async upsertConversationAndMessage(data: {
     empresa_id: string;
     whatsapp_instance_id: string;
@@ -21,9 +35,22 @@ export class ConversationsService {
   }) {
     const db = this.supabase.getServiceRoleClient();
 
+    // Normalizar número de telefone: garantir que contém apenas dígitos
+    // Remove qualquer sufixo restante (@lid, @s.whatsapp.net, etc) e caracteres não numéricos
+    const normalizedPhone = this.normalizeWhatsAppNumber(data.whatsapp_number);
+
+    if (!normalizedPhone || normalizedPhone.length < 10) {
+      this.logger.error('Número de telefone inválido após normalização:', {
+        original: data.whatsapp_number,
+        normalized: normalizedPhone,
+      });
+      throw new Error(`Número de telefone inválido: ${data.whatsapp_number}`);
+    }
+
     this.logger.log('Iniciando upsertConversationAndMessage', {
       empresa_id: data.empresa_id,
-      whatsapp_number: data.whatsapp_number,
+      whatsapp_number_original: data.whatsapp_number,
+      whatsapp_number_normalized: normalizedPhone,
     });
 
     // 1. Buscar ou criar client
@@ -32,11 +59,11 @@ export class ConversationsService {
       .from('clients')
       .select('client_id, nome')
       .eq('empresa_id', data.empresa_id)
-      .eq('whatsapp_number', data.whatsapp_number)
+      .eq('whatsapp_number', normalizedPhone)
       .single();
 
-    // Determinar nome do cliente: usar sender_name se fornecido, senão usar whatsapp_number como fallback
-    const clientName = data.sender_name?.trim() || data.whatsapp_number;
+    // Determinar nome do cliente: usar sender_name se fornecido, senão usar número normalizado como fallback
+    const clientName = data.sender_name?.trim() || normalizedPhone;
 
     if (existingClient) {
       client = existingClient;
@@ -59,7 +86,7 @@ export class ConversationsService {
         .from('clients')
         .insert({
           empresa_id: data.empresa_id,
-          whatsapp_number: data.whatsapp_number,
+          whatsapp_number: normalizedPhone,
           nome: clientName,
         })
         .select('client_id')

@@ -46,6 +46,26 @@ export class WhatsappService {
    * Formato Uazapi: { EventType, message: { chatid, content, text, messageid, sender, senderName, fromMe }, chat, owner }
    * Para áudio/imagem, content pode ser um objeto com {URL, mimetype, fileSHA256, etc}
    */
+  /**
+   * Normaliza um número de telefone do WhatsApp removendo sufixos e caracteres não numéricos
+   * Remove: @s.whatsapp.net, @lid.whatsapp.net, @c.us, @lid, etc
+   * Retorna apenas dígitos
+   */
+  private normalizeWhatsAppNumber(phone: string): string {
+    if (!phone) return '';
+    return phone
+      .toString()
+      .trim()
+      // Remove sufixos conhecidos do WhatsApp
+      .replace(/@s\.whatsapp\.net/gi, '')
+      .replace(/@c\.us/gi, '')
+      .replace(/@lid\.whatsapp\.net/gi, '')
+      // Remove qualquer outro sufixo após @
+      .replace(/@[^@]+$/gi, '')
+      // Mantém apenas dígitos
+      .replace(/\D/g, '');
+  }
+
   private extractMessageData(payload: any): {
     messageId: string;
     from: string;
@@ -67,8 +87,47 @@ export class WhatsappService {
     // Formato Uazapi real: { EventType: "messages", message: { ... }, chat: { ... } }
     if (payload.EventType === 'messages' && payload.message) {
       const msg = payload.message;
-      const phone = msg.sender?.replace('@s.whatsapp.net', '').replace('@c.us', '') ||
-        msg.chatid?.replace('@s.whatsapp.net', '').replace('@c.us', '') || '';
+      // Em alguns casos, sender pode ser um ID interno (@lid) e chatid pode ser o número,
+      // ou vice-versa. Também podem existir outros campos dependendo da versão da Uazapi.
+      const rawCandidates = [
+        msg.sender,
+        msg.chatid,
+        payload.from,
+        payload.sender,
+        payload.chat?.id,
+      ].filter((v) => typeof v === 'string') as string[];
+
+      const normalizedCandidates = rawCandidates
+        .map((c) => this.normalizeWhatsAppNumber(c))
+        .filter((c) => !!c);
+
+      // Heurística para escolher o melhor candidato:
+      // 1. Prefere números começando com 55 (Brasil) com 12-13 dígitos
+      // 2. Depois qualquer número com 10-13 dígitos
+      // 3. Caso contrário, usa o primeiro normalizado
+      let phone = '';
+      let candidates55 = normalizedCandidates.filter(
+        (p) => p.startsWith('55') && p.length >= 12 && p.length <= 13,
+      );
+      if (candidates55.length > 0) {
+        phone = candidates55[0];
+      } else {
+        const lenCandidates = normalizedCandidates.filter(
+          (p) => p.length >= 10 && p.length <= 13,
+        );
+        if (lenCandidates.length > 0) {
+          phone = lenCandidates[0];
+        } else if (normalizedCandidates.length > 0) {
+          phone = normalizedCandidates[0];
+        }
+      }
+
+      if (!phone) {
+        this.logger.warn('Não foi possível determinar número de telefone válido a partir do payload', {
+          rawCandidates,
+          normalizedCandidates,
+        });
+      }
 
       const messageType = this.detectMessageType(msg, payload.EventType);
 
@@ -111,7 +170,7 @@ export class WhatsappService {
     // Formato alternativo: payload direto com data.key (baileys style)
     if (payload.data?.key?.remoteJid) {
       const remoteJid = payload.data.key.remoteJid;
-      const phone = remoteJid.replace('@s.whatsapp.net', '').replace('@c.us', '');
+      const phone = this.normalizeWhatsAppNumber(remoteJid);
 
       // Extrair mídia do formato baileys
       const msg = payload.data.message;
@@ -147,7 +206,7 @@ export class WhatsappService {
     if (payload.from) {
       return {
         messageId: payload.id || payload.messageId || `msg_${Date.now()}`,
-        from: payload.from.replace('@s.whatsapp.net', '').replace('@c.us', ''),
+        from: this.normalizeWhatsAppNumber(payload.from),
         body: payload.body || payload.text || '',
         senderName: payload.notifyName || payload.senderName || payload.pushName || '',
         type: payload.type || 'message',
@@ -417,11 +476,22 @@ ${caption}
       }
 
       // 3. Upsert conversation + contact
+      // Normalizar número de telefone: remover sufixos do WhatsApp (@s.whatsapp.net, @c.us, @lid, etc) e manter apenas dígitos
+      const normalizedPhone = this.normalizeWhatsAppNumber(messageData.from);
+
+      if (!normalizedPhone || normalizedPhone.length < 10) {
+        this.logger.warn('Número de telefone inválido após normalização:', {
+          original: messageData.from,
+          normalized: normalizedPhone,
+        });
+        throw new BadRequestException('Número de telefone inválido no webhook');
+      }
+
       const { conversation_id, message_id } =
         await this.conversationsService.upsertConversationAndMessage({
           empresa_id: instance.empresa_id,
           whatsapp_instance_id: instance.instance_id,
-          whatsapp_number: messageData.from,
+          whatsapp_number: normalizedPhone,
           whatsapp_message_id: messageData.messageId,
           content: messageData.body,
           direction: 'inbound',
