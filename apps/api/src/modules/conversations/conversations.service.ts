@@ -17,6 +17,7 @@ export class ConversationsService {
     content: string;
     direction: 'inbound' | 'outbound';
     role: 'user' | 'assistant' | 'system';
+    sender_name?: string;
   }) {
     const db = this.supabase.getServiceRoleClient();
 
@@ -29,13 +30,29 @@ export class ConversationsService {
     let client;
     const { data: existingClient } = await db
       .from('clients')
-      .select('client_id')
+      .select('client_id, nome')
       .eq('empresa_id', data.empresa_id)
       .eq('whatsapp_number', data.whatsapp_number)
       .single();
 
+    // Determinar nome do cliente: usar sender_name se fornecido, senão usar whatsapp_number como fallback
+    const clientName = data.sender_name?.trim() || data.whatsapp_number;
+
     if (existingClient) {
       client = existingClient;
+      // Atualizar nome do cliente se sender_name foi fornecido e é diferente do nome atual
+      if (data.sender_name && data.sender_name.trim() && existingClient.nome !== data.sender_name.trim()) {
+        const { error: updateError } = await db
+          .from('clients')
+          .update({ nome: data.sender_name.trim() })
+          .eq('client_id', existingClient.client_id);
+
+        if (updateError) {
+          this.logger.warn('Erro ao atualizar nome do cliente:', updateError);
+        } else {
+          this.logger.log('Nome do cliente atualizado:', { client_id: client.client_id, nome: data.sender_name.trim() });
+        }
+      }
       this.logger.log('Client existente encontrado:', { client_id: client.client_id });
     } else {
       const { data: newClient, error: clientError } = await db
@@ -43,6 +60,7 @@ export class ConversationsService {
         .insert({
           empresa_id: data.empresa_id,
           whatsapp_number: data.whatsapp_number,
+          nome: clientName,
         })
         .select('client_id')
         .single();
@@ -52,7 +70,7 @@ export class ConversationsService {
         throw new Error(`Erro ao criar cliente: ${clientError?.message || 'cliente não retornado'}`);
       }
       client = newClient;
-      this.logger.log('Novo client criado:', { client_id: client.client_id });
+      this.logger.log('Novo client criado:', { client_id: client.client_id, nome: clientName });
     }
 
     // 2. Buscar ou criar conversation

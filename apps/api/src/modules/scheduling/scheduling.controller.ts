@@ -1,9 +1,10 @@
-import { Controller, Get, Post, Patch, Delete, Body, Param, Query } from '@nestjs/common';
+import { Controller, Get, Post, Put, Patch, Delete, Body, Param, Query } from '@nestjs/common';
 import { SchedulingService } from './scheduling.service';
 import { CreateAppointmentDto } from './dto/create-appointment.dto';
 import { CreateBlockedTimeDto } from './dto/create-blocked-time.dto';
 import { AvailableSlotsDto } from './dto/available-slots.dto';
 import { CreateAvailabilityRuleDto } from './dto/create-availability-rule.dto';
+import { UpdateAvailabilityRuleDto } from './dto/update-availability-rule.dto';
 
 @Controller('scheduling')
 export class SchedulingController {
@@ -47,6 +48,15 @@ export class SchedulingController {
   @Post('availability-rules')
   async createAvailabilityRule(@Body() dto: CreateAvailabilityRuleDto) {
     return this.schedulingService.createAvailabilityRule(dto);
+  }
+
+  @Put('availability-rules/:id')
+  async updateAvailabilityRule(
+    @Param('id') id: string,
+    @Query('empresa_id') empresaId: string,
+    @Body() dto: UpdateAvailabilityRuleDto,
+  ) {
+    return this.schedulingService.updateAvailabilityRule(id, empresaId, dto);
   }
 
   @Delete('availability-rules/:id')

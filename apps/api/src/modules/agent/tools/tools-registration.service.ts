@@ -26,26 +26,26 @@ export class ToolsRegistrationService implements OnModuleInit {
     this.toolRegistry.registerTool({
       name: 'get_available_slots',
       description:
-        'Buscar horários disponíveis para agendamento. Retorna os slots livres agrupados por colaborador (staff). Os horários retornados estão no formato do Brasil (ex: "09:00", "14:30"). Use os campos start_time e end_time para exibir ao cliente. Se o cliente não tiver preferência, você pode escolher o primeiro horário disponível.',
+        'Buscar horários disponíveis para agendamento. Retorna os slots livres agrupados por colaborador (staff). Cada slot contém: staff_id (UUID), staff_name (nome do profissional), start_iso (horário ISO UTC para usar em create_appointment), end_iso (horário ISO UTC para usar em create_appointment), start_time (horário legível "HH:MM" para exibir), end_time (horário legível "HH:MM" para exibir), date (data "YYYY-MM-DD"). IMPORTANTE: Quando o cliente escolher um horário, use EXATAMENTE o staff_id e os campos start_iso/end_iso retornados por esta ferramenta para criar o agendamento. NÃO tente reconstruir horários ou buscar staff_id novamente. IMPORTANTE: Se você não souber o service_id, SEMPRE chame list_services primeiro para obter os service_ids válidos (são UUIDs, não números simples). Se o cliente mencionar um serviço pelo nome (ex: "cílios"), use list_services para encontrar o service_id correto antes de chamar esta ferramenta.',
       parameters: {
         type: 'object',
         properties: {
           start_date: {
             type: 'string',
-            description: 'Data de início no formato ISO 8601 (YYYY-MM-DD). Exemplo: 2024-01-15',
+            description: 'Data de início no formato ISO 8601 (YYYY-MM-DD). Exemplo: 2026-01-12',
           },
           end_date: {
             type: 'string',
             description:
-              'Data de fim no formato ISO 8601 (YYYY-MM-DD). Deve ser posterior a start_date. Exemplo: 2024-01-20',
+              'Data de fim no formato ISO 8601 (YYYY-MM-DD). Deve ser posterior a start_date. Exemplo: 2026-01-12',
           },
           service_id: {
             type: 'string',
-            description: 'ID do serviço para filtrar disponibilidade',
+            description: 'ID do serviço (UUID) para filtrar disponibilidade. OBRIGATÓRIO: Este deve ser um UUID válido obtido através de list_services. NUNCA use números simples como "1" ou "2". Se não souber o service_id, chame list_services primeiro.',
           },
           staff_id: {
             type: 'string',
-            description: 'ID do profissional específico para filtrar disponibilidade (opcional)',
+            description: 'ID do profissional específico (UUID) para filtrar disponibilidade (opcional). Se não fornecido, retorna horários de todos os profissionais disponíveis.',
           },
         },
         required: ['start_date', 'service_id'],
@@ -56,21 +56,38 @@ export class ToolsRegistrationService implements OnModuleInit {
     this.toolRegistry.registerTool({
       name: 'create_appointment',
       description:
-        'Criar um novo agendamento. Verifica conflitos automaticamente e cria o agendamento se o horário estiver disponível.',
+        'Criar um novo agendamento. Verifica conflitos automaticamente e cria o agendamento se o horário estiver disponível. ' +
+        '🚨 CRÍTICO - LEIA COM ATENÇÃO: ' +
+        '1. Você DEVE usar EXATAMENTE os valores retornados por get_available_slots na chamada ANTERIOR. ' +
+        '2. Quando o cliente escolher um horário (ex: "09:30 com Tereza"), procure no contexto de slots disponíveis o slot correspondente. ' +
+        '3. Use EXATAMENTE: client_id (UUID do cliente fornecido no contexto do sistema), staff_id (UUID do profissional do slot), start_iso (horário ISO UTC do slot), end_iso (horário ISO UTC do slot). ' +
+        '4. NUNCA use a string literal "client_id" - sempre use o UUID real fornecido no prompt do sistema na seção "CLIENTE ATUAL". ' +
+        '5. NUNCA tente reconstruir horários a partir de "HH:MM" ou buscar staff_id novamente. ' +
+        '6. Se você não encontrar o slot no contexto, chame get_available_slots novamente para a data correta. ' +
+        '7. Se os dados não corresponderem a um slot válido, a tool retornará erro. Use os dados EXATOS dos slots.',
       parameters: {
         type: 'object',
         properties: {
-          client_id: { type: 'string', description: 'ID do cliente' },
+          client_id: {
+            type: 'string',
+            description:
+              'ID do cliente (UUID válido). IMPORTANTE: Use o client_id fornecido no contexto do sistema (não use a string literal "client_id"). ' +
+              'O client_id está disponível no prompt do sistema na seção "CLIENTE ATUAL". ' +
+              'Se você não tiver o client_id, o sistema tentará usar o client_id do contexto automaticamente, mas é melhor usar o valor correto desde o início.',
+          },
           service_id: { type: 'string', description: 'ID do serviço' },
-          staff_id: { type: 'string', description: 'ID do profissional que realizará o serviço' },
+          staff_id: {
+            type: 'string',
+            description: 'ID do profissional (UUID). DEVE ser o staff_id EXATO retornado pelo slot escolhido em get_available_slots. NÃO use o nome do profissional.',
+          },
           start_time: {
             type: 'string',
-            description: 'Data/hora de início no formato ISO 8601. Exemplo: 2024-01-15T10:00:00Z',
+            description: 'Data/hora de início no formato ISO 8601 UTC. DEVE ser o campo start_iso EXATO do slot escolhido em get_available_slots. Exemplo: 2026-01-14T12:00:00Z',
           },
           end_time: {
             type: 'string',
             description:
-              'Data/hora de fim no formato ISO 8601. Deve ser posterior a start_time. Exemplo: 2024-01-15T11:00:00Z',
+              'Data/hora de fim no formato ISO 8601 UTC. DEVE ser o campo end_iso EXATO do slot escolhido em get_available_slots. Exemplo: 2026-01-14T13:00:00Z',
           },
           resource_id: { type: 'string', description: 'ID do recurso (opcional)' },
           notes: { type: 'string', description: 'Observações sobre o agendamento (opcional)' },

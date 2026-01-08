@@ -37,8 +37,8 @@ import {
 } from "@/components/ui/select";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Trash2, Plus, Clock } from "lucide-react";
-import { useAvailabilityRules } from "../hooks/useAvailabilityRules";
+import { Trash2, Plus, Clock, Pencil } from "lucide-react";
+import { useAvailabilityRules, type AvailabilityRule } from "../hooks/useAvailabilityRules";
 import { apiClient } from "@/lib/api-client";
 
 interface AvailabilityTabProps {
@@ -56,10 +56,12 @@ const DAYS_OF_WEEK = [
 ];
 
 export function AvailabilityTab({ empresaId }: AvailabilityTabProps) {
-  const { rules, loading, createRule, deleteRule } = useAvailabilityRules(empresaId);
+  const { rules, loading, createRule, updateRule, deleteRule } = useAvailabilityRules(empresaId);
   const [isDialogOpen, setIsDialogOpen] = useState(false);
+  const [editingRule, setEditingRule] = useState<AvailabilityRule | null>(null);
   const [staff, setStaff] = useState<Array<{ staff_id: string; nome: string }>>([]);
   const [loadingStaff, setLoadingStaff] = useState(false);
+  const [formErrors, setFormErrors] = useState<{ start_time?: string; end_time?: string }>({});
   const [newRule, setNewRule] = useState<{
     day_of_week: string;
     start_time: string;
@@ -88,31 +90,83 @@ export function AvailabilityTab({ empresaId }: AvailabilityTabProps) {
     fetchStaff();
   }, [empresaId]);
 
-  // Reset form when dialog opens
+  // Reset form when dialog opens or editingRule changes
   useEffect(() => {
     if (isDialogOpen) {
-      setNewRule({
-        day_of_week: "1",
-        start_time: "09:00",
-        end_time: "18:00",
-        staff_id: "all",
-      });
+      if (editingRule) {
+        // Modo edição: preencher com dados da regra
+        setNewRule({
+          day_of_week: editingRule.day_of_week.toString(),
+          start_time: editingRule.start_time.slice(0, 5), // Remove segundos se houver
+          end_time: editingRule.end_time.slice(0, 5),
+          staff_id: editingRule.staff_id || "all",
+        });
+      } else {
+        // Modo criação: resetar formulário
+        setNewRule({
+          day_of_week: "1",
+          start_time: "09:00",
+          end_time: "18:00",
+          staff_id: "all",
+        });
+      }
+      setFormErrors({});
     }
-  }, [isDialogOpen]);
+  }, [isDialogOpen, editingRule]);
 
-  const handleCreate = async () => {
+  const validateForm = (): boolean => {
+    const errors: { start_time?: string; end_time?: string } = {};
+    
+    if (newRule.start_time >= newRule.end_time) {
+      errors.end_time = "Horário de fim deve ser maior que horário de início";
+    }
+    
+    setFormErrors(errors);
+    return Object.keys(errors).length === 0;
+  };
+
+  const handleSave = async () => {
+    if (!validateForm()) {
+      return;
+    }
+
     try {
-      const staffId = newRule.staff_id === "all" || !newRule.staff_id ? undefined : newRule.staff_id;
-      await createRule({
-        day_of_week: parseInt(newRule.day_of_week),
-        start_time: newRule.start_time,
-        end_time: newRule.end_time,
-        staff_id: staffId,
-      });
+      const staffId = newRule.staff_id === "all" || !newRule.staff_id ? null : newRule.staff_id;
+      
+      if (editingRule) {
+        // Modo edição
+        await updateRule(editingRule.rule_id, {
+          day_of_week: parseInt(newRule.day_of_week),
+          start_time: newRule.start_time,
+          end_time: newRule.end_time,
+          staff_id: staffId,
+        });
+      } else {
+        // Modo criação
+        await createRule({
+          day_of_week: parseInt(newRule.day_of_week),
+          start_time: newRule.start_time,
+          end_time: newRule.end_time,
+          staff_id: staffId || undefined,
+        });
+      }
+      
       setIsDialogOpen(false);
+      setEditingRule(null);
     } catch (e) {
       // Error handled in hook
     }
+  };
+
+  const handleEdit = (rule: AvailabilityRule) => {
+    setEditingRule(rule);
+    setIsDialogOpen(true);
+  };
+
+  const handleCancel = () => {
+    setIsDialogOpen(false);
+    setEditingRule(null);
+    setFormErrors({});
   };
 
   const getDayLabel = (day: number) => {
@@ -133,7 +187,13 @@ export function AvailabilityTab({ empresaId }: AvailabilityTabProps) {
             Defina os horários em que sua empresa está disponível para agendamentos.
           </p>
         </div>
-        <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
+        <Dialog open={isDialogOpen} onOpenChange={(open) => {
+          setIsDialogOpen(open);
+          if (!open) {
+            setEditingRule(null);
+            setFormErrors({});
+          }
+        }}>
           <DialogTrigger asChild>
             <Button>
               <Plus className="mr-2 h-4 w-4" />
@@ -142,9 +202,13 @@ export function AvailabilityTab({ empresaId }: AvailabilityTabProps) {
           </DialogTrigger>
           <DialogContent>
             <DialogHeader>
-              <DialogTitle>Adicionar Regra de Horário</DialogTitle>
+              <DialogTitle>
+                {editingRule ? "Editar Regra de Horário" : "Adicionar Regra de Horário"}
+              </DialogTitle>
               <DialogDescription>
-                Configure um novo intervalo de disponiblidade.
+                {editingRule
+                  ? "Altere os campos desejados da regra de disponibilidade."
+                  : "Configure um novo intervalo de disponiblidade."}
               </DialogDescription>
             </DialogHeader>
             <div className="grid gap-4 py-4">
@@ -184,13 +248,23 @@ export function AvailabilityTab({ empresaId }: AvailabilityTabProps) {
                 <Label htmlFor="end" className="text-right">
                   Fim
                 </Label>
-                <Input
-                  id="end"
-                  type="time"
-                  value={newRule.end_time}
-                  onChange={(e) => setNewRule({ ...newRule, end_time: e.target.value })}
-                  className="col-span-3"
-                />
+                <div className="col-span-3">
+                  <Input
+                    id="end"
+                    type="time"
+                    value={newRule.end_time}
+                    onChange={(e) => {
+                      setNewRule({ ...newRule, end_time: e.target.value });
+                      if (formErrors.end_time) {
+                        setFormErrors({ ...formErrors, end_time: undefined });
+                      }
+                    }}
+                    className={formErrors.end_time ? "border-destructive" : ""}
+                  />
+                  {formErrors.end_time && (
+                    <p className="text-sm text-destructive mt-1">{formErrors.end_time}</p>
+                  )}
+                </div>
               </div>
               <div className="grid grid-cols-4 items-center gap-4">
                 <Label htmlFor="staff" className="text-right">
@@ -225,21 +299,15 @@ export function AvailabilityTab({ empresaId }: AvailabilityTabProps) {
               </div>
             </div>
             <DialogFooter>
-              <Button 
-                variant="outline" 
-                onClick={() => {
-                  setIsDialogOpen(false);
-                  setNewRule({
-                    day_of_week: "1",
-                    start_time: "09:00",
-                    end_time: "18:00",
-                    staff_id: "all",
-                  });
-                }}
-              >
+              <Button variant="outline" onClick={handleCancel}>
                 Cancelar
               </Button>
-              <Button onClick={handleCreate}>Salvar</Button>
+              <Button 
+                onClick={handleSave}
+                disabled={!!formErrors.end_time || newRule.start_time >= newRule.end_time}
+              >
+                {editingRule ? "Atualizar" : "Criar"}
+              </Button>
             </DialogFooter>
           </DialogContent>
         </Dialog>
@@ -296,14 +364,24 @@ export function AvailabilityTab({ empresaId }: AvailabilityTabProps) {
                       )}
                     </TableCell>
                     <TableCell>
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        onClick={() => deleteRule(rule.rule_id)}
-                        className="text-destructive hover:text-destructive/90"
-                      >
-                        <Trash2 className="h-4 w-4" />
-                      </Button>
+                      <div className="flex items-center gap-2">
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          onClick={() => handleEdit(rule)}
+                          className="hover:text-primary"
+                        >
+                          <Pencil className="h-4 w-4" />
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          onClick={() => deleteRule(rule.rule_id)}
+                          className="text-destructive hover:text-destructive/90"
+                        >
+                          <Trash2 className="h-4 w-4" />
+                        </Button>
+                      </div>
                     </TableCell>
                   </TableRow>
                 ))

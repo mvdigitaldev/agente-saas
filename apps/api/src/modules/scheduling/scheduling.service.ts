@@ -5,6 +5,7 @@ import { CreateBlockedTimeDto } from './dto/create-blocked-time.dto';
 import { AvailableSlotsDto } from './dto/available-slots.dto';
 import { PaymentLinkDto } from './dto/payment-link.dto';
 import { CreateAvailabilityRuleDto } from './dto/create-availability-rule.dto';
+import { UpdateAvailabilityRuleDto } from './dto/update-availability-rule.dto';
 
 @Injectable()
 export class SchedulingService {
@@ -22,7 +23,21 @@ export class SchedulingService {
       .single();
 
     if (serviceError || !service) {
-      throw new BadRequestException('Serviço não encontrado ou sem duração definida');
+      // Buscar lista de serviços disponíveis para sugerir ao agente
+      const { data: availableServices } = await db
+        .from('services')
+        .select('service_id, nome')
+        .eq('empresa_id', dto.empresa_id)
+        .eq('ativo', true)
+        .limit(10);
+
+      const servicesList = availableServices?.map(s => `- ${s.nome} (ID: ${s.service_id})`).join('\n') || 'Nenhum serviço encontrado';
+      
+      throw new BadRequestException(
+        `Serviço não encontrado. O service_id "${dto.service_id}" não existe ou não está ativo. ` +
+        `Por favor, chame list_services primeiro para obter os service_ids válidos. ` +
+        `Serviços disponíveis:\n${servicesList}`
+      );
     }
 
     const duration = service.duracao_minutos;
@@ -215,22 +230,121 @@ export class SchedulingService {
     };
   }
 
+  /**
+   * Converte horário UTC (que representa horário do Brasil) para formato local
+   * Exemplo: "2026-01-14T17:00:00Z" (17:00 UTC = 14:00 Brasil) -> "2026-01-14T14:00:00"
+   * 
+   * Esta função é necessária porque os slots disponíveis retornam horários em UTC
+   * que representam horários do Brasil. Quando salvamos no banco, precisamos
+   * converter para o horário local do Brasil para que seja exibido corretamente.
+   */
+  private convertUtcToBrasilLocal(utcIsoString: string): string {
+    // Garantir que a string seja tratada como UTC
+    // Se não tiver indicador de timezone (Z, +, -), adicionar Z
+    let normalizedUtcString = utcIsoString;
+    if (!utcIsoString.endsWith('Z') && !utcIsoString.match(/[+-]\d{2}:\d{2}$/)) {
+      // Se termina com números (sem timezone), adicionar Z para indicar UTC
+      if (/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}$/.test(utcIsoString)) {
+        normalizedUtcString = `${utcIsoString}Z`;
+      }
+    }
+    
+    const utcDate = new Date(normalizedUtcString);
+    
+    // Usar Intl.DateTimeFormat para obter os componentes no timezone do Brasil
+    const formatter = new Intl.DateTimeFormat('en-US', {
+      timeZone: 'America/Sao_Paulo',
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+      hour: '2-digit',
+      minute: '2-digit',
+      second: '2-digit',
+      hour12: false
+    });
+    
+    // Formatar a data no timezone do Brasil
+    const parts = formatter.formatToParts(utcDate);
+    const year = parts.find(p => p.type === 'year')?.value;
+    const month = parts.find(p => p.type === 'month')?.value;
+    const day = parts.find(p => p.type === 'day')?.value;
+    const hours = parts.find(p => p.type === 'hour')?.value;
+    const minutes = parts.find(p => p.type === 'minute')?.value;
+    const seconds = parts.find(p => p.type === 'second')?.value;
+    
+    // Retornar no formato ISO sem timezone (será interpretado como local pelo banco)
+    return `${year}-${month}-${day}T${hours}:${minutes}:${seconds}`;
+  }
+
   async createAppointment(dto: CreateAppointmentDto) {
     const db = this.supabase.getServiceRoleClient();
+
+    // Converter horários UTC para horário local do Brasil antes de salvar
+    // Os horários vêm em UTC (ex: "2026-01-14T17:00:00Z" que representa 14:00 no Brasil)
+    // Precisamos converter para o formato local (ex: "2026-01-14T14:00:00")
+    const startTimeLocal = this.convertUtcToBrasilLocal(dto.start_time);
+    const endTimeLocal = this.convertUtcToBrasilLocal(dto.end_time);
+
+    // Verificar se não conflita com agendamentos existentes
+    const { data: conflictingAppointment } = await db
+      .from('appointments')
+      .select('*')
+      .eq('empresa_id', dto.empresa_id)
+      .eq('status', 'scheduled')
+      .or(`and(start_time.lt.${endTimeLocal},end_time.gt.${startTimeLocal})`)
+      .maybeSingle();
+
+    if (conflictingAppointment) {
+      throw new BadRequestException(
+        `Conflito: Já existe um agendamento neste horário (ID: ${conflictingAppointment.appointment_id})`
+      );
+    }
 
     // Verificar se não conflita com bloqueios
     const { data: conflictingBlock } = await db
       .from('blocked_times')
       .select('*')
       .eq('empresa_id', dto.empresa_id)
-      .or(`start_time.lte.${dto.end_time},end_time.gte.${dto.start_time}`)
-      .single();
+      .or(`and(start_time.lt.${endTimeLocal},end_time.gt.${startTimeLocal})`)
+      .maybeSingle();
 
     if (conflictingBlock) {
       throw new BadRequestException('Horário bloqueado');
     }
 
-    const { data: appointment } = await db
+    // Verificar se o staff existe e pertence à empresa
+    if (dto.staff_id) {
+      const { data: staff } = await db
+        .from('staff')
+        .select('staff_id, nome')
+        .eq('staff_id', dto.staff_id)
+        .eq('empresa_id', dto.empresa_id)
+        .eq('ativo', true)
+        .maybeSingle();
+
+      if (!staff) {
+        throw new BadRequestException(
+          `Profissional não encontrado ou inativo. staff_id: ${dto.staff_id}`
+        );
+      }
+    }
+
+    // Verificar se o serviço existe e pertence à empresa
+    const { data: service } = await db
+      .from('services')
+      .select('service_id, nome')
+      .eq('service_id', dto.service_id)
+      .eq('empresa_id', dto.empresa_id)
+      .eq('ativo', true)
+      .maybeSingle();
+
+    if (!service) {
+      throw new BadRequestException(
+        `Serviço não encontrado ou inativo. service_id: ${dto.service_id}`
+      );
+    }
+
+    const { data: appointment, error: insertError } = await db
       .from('appointments')
       .insert({
         empresa_id: dto.empresa_id,
@@ -238,13 +352,19 @@ export class SchedulingService {
         service_id: dto.service_id,
         staff_id: dto.staff_id,
         resource_id: dto.resource_id,
-        start_time: dto.start_time,
-        end_time: dto.end_time,
+        start_time: startTimeLocal,
+        end_time: endTimeLocal,
         status: 'scheduled',
         notes: dto.notes,
       })
       .select()
       .single();
+
+    if (insertError) {
+      throw new BadRequestException(
+        `Erro ao criar agendamento: ${insertError.message}`
+      );
+    }
 
     return appointment;
   }
@@ -335,6 +455,10 @@ export class SchedulingService {
   async rescheduleAppointment(appointmentId: string, empresaId: string, data: { start_time: string; end_time: string }) {
     const db = this.supabase.getServiceRoleClient();
 
+    // Converter horários UTC para horário local do Brasil antes de salvar
+    const startTimeLocal = this.convertUtcToBrasilLocal(data.start_time);
+    const endTimeLocal = this.convertUtcToBrasilLocal(data.end_time);
+
     // Verificar se agendamento existe e pertence à empresa
     const { data: appointment } = await db
       .from('appointments')
@@ -352,7 +476,7 @@ export class SchedulingService {
       .from('blocked_times')
       .select('*')
       .eq('empresa_id', empresaId)
-      .or(`start_time.lte.${data.end_time},end_time.gte.${data.start_time}`)
+      .or(`start_time.lte.${endTimeLocal},end_time.gte.${startTimeLocal}`)
       .single();
 
     if (conflictingBlock) {
@@ -366,7 +490,7 @@ export class SchedulingService {
       .eq('empresa_id', empresaId)
       .neq('appointment_id', appointmentId)
       .in('status', ['scheduled', 'confirmed'])
-      .or(`start_time.lte.${data.end_time},end_time.gte.${data.start_time}`)
+      .or(`start_time.lte.${endTimeLocal},end_time.gte.${startTimeLocal}`)
       .single();
 
     if (conflictingAppointment) {
@@ -377,8 +501,8 @@ export class SchedulingService {
     const { data: updated } = await db
       .from('appointments')
       .update({
-        start_time: data.start_time,
-        end_time: data.end_time,
+        start_time: startTimeLocal,
+        end_time: endTimeLocal,
         updated_at: new Date().toISOString(),
       })
       .eq('appointment_id', appointmentId)
@@ -588,6 +712,83 @@ export class SchedulingService {
     if (error) {
       console.error('Error creating availability rule:', error);
       throw new BadRequestException(`Erro ao criar regra de disponibilidade: ${error.message}`);
+    }
+
+    return data;
+  }
+
+  async updateAvailabilityRule(ruleId: string, empresaId: string, dto: UpdateAvailabilityRuleDto) {
+    const db = this.supabase.getServiceRoleClient();
+
+    // Verificar se a regra existe e pertence à empresa
+    const { data: existingRule, error: fetchError } = await db
+      .from('availability_rules')
+      .select('*')
+      .eq('rule_id', ruleId)
+      .eq('empresa_id', empresaId)
+      .single();
+
+    if (fetchError || !existingRule) {
+      throw new NotFoundException('Regra de disponibilidade não encontrada');
+    }
+
+    // Validações
+    if (dto.day_of_week !== undefined && (dto.day_of_week < 0 || dto.day_of_week > 6)) {
+      throw new BadRequestException('day_of_week deve estar entre 0 (domingo) e 6 (sábado)');
+    }
+
+    const startTime = dto.start_time || existingRule.start_time;
+    const endTime = dto.end_time || existingRule.end_time;
+
+    if (startTime >= endTime) {
+      throw new BadRequestException('start_time deve ser menor que end_time');
+    }
+
+    // Se staff_id for fornecido, verificar que o staff existe e está ativo
+    if (dto.staff_id !== undefined && dto.staff_id !== null) {
+      const { data: staff } = await db
+        .from('staff')
+        .select('staff_id, ativo')
+        .eq('staff_id', dto.staff_id)
+        .eq('empresa_id', empresaId)
+        .single();
+
+      if (!staff) {
+        throw new NotFoundException('Profissional não encontrado');
+      }
+
+      if (!staff.ativo) {
+        throw new BadRequestException('Profissional não está ativo');
+      }
+    }
+
+    // Preparar dados para atualização
+    const updateData: any = {};
+    if (dto.day_of_week !== undefined) {
+      updateData.day_of_week = dto.day_of_week;
+    }
+    if (dto.start_time !== undefined) {
+      updateData.start_time = dto.start_time;
+    }
+    if (dto.end_time !== undefined) {
+      updateData.end_time = dto.end_time;
+    }
+    if (dto.staff_id !== undefined) {
+      updateData.staff_id = dto.staff_id || null;
+    }
+
+    // Atualizar regra
+    const { data, error } = await db
+      .from('availability_rules')
+      .update(updateData)
+      .eq('rule_id', ruleId)
+      .eq('empresa_id', empresaId)
+      .select()
+      .single();
+
+    if (error) {
+      console.error('Error updating availability rule:', error);
+      throw new BadRequestException(`Erro ao atualizar regra de disponibilidade: ${error.message}`);
     }
 
     return data;

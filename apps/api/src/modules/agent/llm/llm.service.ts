@@ -56,8 +56,10 @@ export class LlmService {
   async generateResponse(params: {
     messages: LlmMessage[];
     tools?: LlmTool[];
+    model?: string;
+    maxTokens?: number;
   }): Promise<LlmResponse> {
-    const { messages, tools } = params;
+    const { messages, tools, model: overrideModel, maxTokens } = params;
 
     try {
       const requestMessages = messages.map((msg) => {
@@ -80,10 +82,18 @@ export class LlmService {
         return base;
       });
 
+      // Usar modelo override se fornecido, senão usar o padrão
+      const modelToUse = overrideModel || this.model;
+      
+      // Configurar max_tokens baseado no modelo
+      const defaultMaxTokens = this.getDefaultMaxTokens(modelToUse);
+      const maxTokensToUse = maxTokens || defaultMaxTokens;
+
       const requestOptions: any = {
-        model: this.model,
+        model: modelToUse,
         messages: requestMessages,
         temperature: 0,
+        max_tokens: maxTokensToUse,
       };
 
       if (tools && tools.length > 0) {
@@ -129,6 +139,29 @@ export class LlmService {
       this.logger.error(`Erro ao chamar OpenAI: ${error.message}`, error.stack);
       throw error;
     }
+  }
+
+  /**
+   * Retorna max_tokens padrão baseado no modelo
+   */
+  private getDefaultMaxTokens(model: string): number {
+    // gpt-4o e variantes: 16k tokens de saída
+    if (model.includes('gpt-4o')) {
+      return 16384;
+    }
+    
+    // gpt-4o-mini: 16k tokens de saída
+    if (model.includes('gpt-4o-mini')) {
+      return 16384;
+    }
+    
+    // gpt-4: 8k tokens de saída
+    if (model.includes('gpt-4')) {
+      return 8192;
+    }
+    
+    // Padrão conservador
+    return 4096;
   }
 }
 

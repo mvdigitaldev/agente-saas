@@ -426,6 +426,7 @@ ${caption}
           content: messageData.body,
           direction: 'inbound',
           role: 'user',
+          sender_name: messageData.senderName,
         });
 
       this.logger.log('💬 Conversa criada/atualizada:', { conversation_id, message_id });

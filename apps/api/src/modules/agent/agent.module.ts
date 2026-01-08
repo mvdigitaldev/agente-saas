@@ -5,6 +5,8 @@ import { AgentProcessor } from './agent.processor';
 import { LlmService } from './llm/llm.service';
 import { ToolRegistry } from './tools/tool.registry';
 import { ToolExecutorService } from './tools/tool-executor.service';
+import { ToolValidatorService } from './tools/validation/tool-validator.service';
+import { ToolContextService } from './context/tool-context.service';
 import { ToolsRegistrationService } from './tools/tools-registration.service';
 import { PromptBuilderService } from './prompt/prompt-builder.service';
 import { SchedulingTools } from './tools/handlers/scheduling.tools';
@@ -42,6 +44,8 @@ import { getRedisConnection } from '../../config/redis.config';
     LlmService,
     ToolRegistry,
     ToolExecutorService,
+    ToolValidatorService,
+    ToolContextService,
     ToolsRegistrationService,
     PromptBuilderService,
     SchedulingTools,

@@ -24,7 +24,8 @@
     "ioredis": "^5.8.2",
     "openai": "^4.104.0",
     "reflect-metadata": "^0.1.13",
-    "rxjs": "^7.8.0"
+    "rxjs": "^7.8.0",
+    "zod": "^4.3.5"
   },
   "devDependencies": {
     "@nestjs/cli": "^10.0.0",

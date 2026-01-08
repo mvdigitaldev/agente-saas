@@ -2,6 +2,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import { LlmService } from './llm/llm.service';
 import { ToolRegistry } from './tools/tool.registry';
 import { ToolExecutorService } from './tools/tool-executor.service';
+import { ToolContextService } from './context/tool-context.service';
 import { PromptBuilderService } from './prompt/prompt-builder.service';
 import { ConversationsService } from '../conversations/conversations.service';
 import { WhatsappService } from '../whatsapp/whatsapp.service';
@@ -33,6 +34,7 @@ export class AgentService {
     private readonly llmService: LlmService,
     private readonly toolRegistry: ToolRegistry,
     private readonly toolExecutor: ToolExecutorService,
+    private readonly toolContext: ToolContextService,
     private readonly promptBuilder: PromptBuilderService,
     private readonly conversationsService: ConversationsService,
     private readonly whatsappService: WhatsappService,
@@ -56,18 +58,35 @@ export class AgentService {
 
       // Construir contexto
       const db = this.supabase.getServiceRoleClient();
-      const { data: conversation } = await db
+      const { data: conversation, error: conversationError } = await db
         .from('conversations')
         .select('client_id')
         .eq('conversation_id', job.conversation_id)
         .single();
 
+      if (conversationError || !conversation) {
+        this.logger.error('Erro ao buscar conversation:', conversationError);
+        throw new Error(`Conversa não encontrada: ${conversationError?.message || 'conversation_id inválido'}`);
+      }
+
+      if (!conversation.client_id) {
+        this.logger.error('Conversa sem client_id:', { conversation_id: job.conversation_id });
+        throw new Error(`Conversa ${job.conversation_id} não possui client_id. Isso não deveria acontecer. Verifique se o cliente foi criado corretamente.`);
+      }
+
       const context: AgentContext = {
         empresa_id: job.company_id,
         conversation_id: job.conversation_id,
-        client_id: conversation?.client_id,
+        client_id: conversation.client_id,
         job_id: job.job_id,
       };
+
+      this.logger.debug('Context criado:', { 
+        empresa_id: context.empresa_id, 
+        conversation_id: context.conversation_id, 
+        client_id: context.client_id,
+        has_client_id: !!context.client_id 
+      });
 
       // Executar conversa
       const response = await this.runConversation(context, job.message);
@@ -128,6 +147,32 @@ export class AgentService {
       .eq('conversation_id', context.conversation_id)
       .single();
 
+    // Limpar contexto expirado
+    this.toolContext.cleanupExpiredContext(context.conversation_id);
+
+    // Obter contexto de tool calls recentes (especialmente para agendamento)
+    const schedulingContext = this.toolContext.getSchedulingContext(context.conversation_id);
+
+    // Logging de contexto disponível
+    if (schedulingContext.availableSlots) {
+      const slotsCount = Array.isArray(schedulingContext.availableSlots) 
+        ? schedulingContext.availableSlots.reduce((sum, staff) => sum + (staff.slots?.length || 0), 0)
+        : 0;
+      
+      this.logger.log(
+        JSON.stringify({
+          event: 'context_available',
+          conversation_id: context.conversation_id,
+          has_slots: true,
+          slots_count: slotsCount,
+          staff_count: Array.isArray(schedulingContext.availableSlots) ? schedulingContext.availableSlots.length : 0,
+          has_formatted_context: !!schedulingContext.formattedContext,
+          last_service_id: schedulingContext.lastServiceId,
+          timestamp: new Date().toISOString(),
+        }),
+      );
+    }
+
     // Construir prompt
     const promptMessages = await this.promptBuilder.build({
       config: config || {},
@@ -135,6 +180,8 @@ export class AgentService {
       messages: messages || [],
       summary: memory?.summary || null,
       incomingMessage,
+      client_id: context.client_id,
+      toolContext: schedulingContext,
     });
 
     // Obter max iterations
@@ -161,17 +208,67 @@ export class AgentService {
     // Obter tools habilitadas
     const tools = this.toolRegistry.getToolsForOpenAI(context.empresa_id, features);
 
+    const loopStartTime = Date.now();
+    
     // Loop de tool calling
     for (let iteration = 0; iteration < maxIterations; iteration++) {
+      const iterationStartTime = Date.now();
+      
       try {
+        this.logger.debug(
+          JSON.stringify({
+            event: 'llm_call_start',
+            iteration: iteration + 1,
+            max_iterations: maxIterations,
+            conversation_id: context.conversation_id,
+            tools_available: tools.length,
+            timestamp: new Date().toISOString(),
+          }),
+        );
+        
+        // Obter modelo configurado (se houver) ou usar padrão
+        const modelOverride = features?.openai_model || undefined;
+        const maxTokens = features?.max_tokens || undefined;
+        
         // Chamar LLM
         const response = await this.llmService.generateResponse({
           messages,
           tools: tools.length > 0 ? tools : undefined,
+          model: modelOverride,
+          maxTokens,
         });
+        
+        const iterationDuration = Date.now() - iterationStartTime;
+        
+        this.logger.debug(
+          JSON.stringify({
+            event: 'llm_call_complete',
+            iteration: iteration + 1,
+            conversation_id: context.conversation_id,
+            duration_ms: iterationDuration,
+            has_tool_calls: (response.toolCalls?.length || 0) > 0,
+            tool_calls_count: response.toolCalls?.length || 0,
+            tokens_used: response.usage?.total_tokens,
+            timestamp: new Date().toISOString(),
+          }),
+        );
 
         // Se não há tool calls, retornar resposta final
         if (!response.toolCalls || response.toolCalls.length === 0) {
+          const totalDuration = Date.now() - loopStartTime;
+          
+          this.logger.log(
+            JSON.stringify({
+              event: 'agent_response_complete',
+              conversation_id: context.conversation_id,
+              total_iterations: iteration + 1,
+              total_duration_ms: totalDuration,
+              tokens_used: response.usage?.total_tokens,
+              has_content: !!response.content,
+              timestamp: new Date().toISOString(),
+            }),
+          );
+          
           return {
             content: response.content || null,
             shouldTerminate: false,

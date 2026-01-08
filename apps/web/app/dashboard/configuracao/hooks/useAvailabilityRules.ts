@@ -21,6 +21,13 @@ export interface CreateAvailabilityRuleInput {
   staff_id?: string;
 }
 
+export interface UpdateAvailabilityRuleInput {
+  day_of_week?: number;
+  start_time?: string;
+  end_time?: string;
+  staff_id?: string | null;
+}
+
 export function useAvailabilityRules(empresaId: string | null) {
   const [rules, setRules] = useState<AvailabilityRule[]>([]);
   const [loading, setLoading] = useState(true);
@@ -72,6 +79,32 @@ export function useAvailabilityRules(empresaId: string | null) {
     }
   };
 
+  const updateRule = async (ruleId: string, data: UpdateAvailabilityRuleInput) => {
+    if (!empresaId) return;
+    try {
+      const response = await apiClient.put(
+        `/scheduling/availability-rules/${ruleId}?empresa_id=${empresaId}`,
+        data
+      );
+      setRules((prev) =>
+        prev.map((r) => (r.rule_id === ruleId ? response.data : r))
+      );
+      toast({
+        title: "Sucesso",
+        description: "Regra atualizada com sucesso!",
+      });
+      return response.data;
+    } catch (error: any) {
+      console.error("Erro ao atualizar regra:", error);
+      toast({
+        title: "Erro",
+        description: error.response?.data?.message || "Não foi possível atualizar a regra.",
+        variant: "destructive",
+      });
+      throw error;
+    }
+  };
+
   const deleteRule = async (ruleId: string) => {
     if (!empresaId) return;
     try {
@@ -96,6 +129,7 @@ export function useAvailabilityRules(empresaId: string | null) {
     rules,
     loading,
     createRule,
+    updateRule,
     deleteRule,
     refetch: fetchRules,
   };

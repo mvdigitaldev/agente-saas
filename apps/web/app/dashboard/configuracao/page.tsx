@@ -9,6 +9,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { AgentTab } from "./components/AgentTab";
 import { ServicesTab } from "./components/ServicesTab";
 import { AvailabilityTab } from "./components/AvailabilityTab";
+import { ClientsTab } from "./components/ClientsTab";
 
 export default function ConfiguracaoPage() {
   const [empresaId, setEmpresaId] = useState<string | null>(null);
@@ -97,6 +98,7 @@ export default function ConfiguracaoPage() {
           <TabsTrigger value="agente">Agente</TabsTrigger>
           <TabsTrigger value="servicos">Serviços</TabsTrigger>
           <TabsTrigger value="horarios">Horários</TabsTrigger>
+          <TabsTrigger value="clientes">Clientes</TabsTrigger>
         </TabsList>
         <TabsContent value="agente" className="mt-6">
           <AgentTab empresaId={empresaId} />
@@ -106,6 +108,9 @@ export default function ConfiguracaoPage() {
         </TabsContent>
         <TabsContent value="horarios" className="mt-6">
           <AvailabilityTab empresaId={empresaId} />
+        </TabsContent>
+        <TabsContent value="clientes" className="mt-6">
+          <ClientsTab />
         </TabsContent>
       </Tabs>
     </div>

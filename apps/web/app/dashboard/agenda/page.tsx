@@ -21,6 +21,7 @@ import {
 export default function AgendaPage() {
     const [loading, setLoading] = useState(true)
     const [empresaId, setEmpresaId] = useState<string | null>(null)
+    const [events, setEvents] = useState<any[]>([])
     const [staff, setStaff] = useState<any[]>([])
     const [selectedStaff, setSelectedStaff] = useState<string>('all')
     const { toast } = useToast()
